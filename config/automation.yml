@@ -1,0 +1,36 @@
+annual_refresh:
+  enabled: true
+  default_fiscal_year_end_month: 3
+  filing_windows:
+    - name: march_end_annual
+      fiscal_year_end_month: 3
+      start_month_day: "06-01"
+      end_month_day: "08-15"
+  review_gate:
+    enabled: true
+    max_active_review_items: 0
+    max_saved_unapplied_reviews: 0
+    require_final_outputs: true
+    require_algorithm_audit: false
+  schedule:
+    engine: launchd
+    intended_frequency: daily_during_window
+    first_check_month_day: "06-20"
+    rerun_until_month_day: "08-15"
+    local_time: "07:30"
+    note: "レビュー未完了なら annual-refresh は停止し、EDINET取得へ進まない。"
+
+roll_forward:
+  enabled: true
+  copy_latest_company_year_per_company: true
+  reset_transition_year_flag: true
+  clear_event_fields: true
+  manual_check_required_fields:
+    - reporting_entity_id
+    - parent_group_id_at_year_end
+    - current_parent_group_id
+    - ownership_status
+    - listing_status
+    - data_scope_allowed
+    - analysis_treatment
+

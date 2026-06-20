@@ -1,0 +1,14 @@
+.env
+.tailscale-state
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.DS_Store
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+*.bak-*
+config/*.xlsx
+data/*
+!data/.gitkeep

@@ -1,0 +1,92 @@
+#!/usr/bin/env sh
+set -eu
+
+cd "$(dirname "$0")"
+
+PYTHON_BIN="${PYTHON:-python3}"
+
+if [ -d ".venv" ]; then
+  . ".venv/bin/activate"
+fi
+
+ENV_FILE=".env"
+if [ ! -f "$ENV_FILE" ] && [ -f ".env.txt" ]; then
+  ENV_FILE=".env.txt"
+fi
+if [ ! -f "$ENV_FILE" ] && [ -f "env.txt" ]; then
+  ENV_FILE="env.txt"
+fi
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "./$ENV_FILE"
+  set +a
+fi
+
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/yuho-pycache}"
+export PYTHONPATH="${PYTHONPATH:-src}"
+
+if [ "$#" -eq 0 ]; then
+  exec "$PYTHON_BIN" -m yuho_auto_extract run-all
+fi
+
+case "$1" in
+  menu)
+    exec "$PYTHON_BIN" tools/operation_menu.py
+    ;;
+  run)
+    exec "$PYTHON_BIN" -m yuho_auto_extract run-all
+    ;;
+  test)
+    exec "$PYTHON_BIN" -m unittest discover -s tests
+    ;;
+  init)
+    exec "$PYTHON_BIN" -m yuho_auto_extract init-xlsx
+    ;;
+  report)
+    exec "$PYTHON_BIN" -m yuho_auto_extract report
+    ;;
+  ai)
+    exec "$PYTHON_BIN" -m yuho_auto_extract build-ai-bundle
+    ;;
+  audit)
+    exec "$PYTHON_BIN" -m yuho_auto_extract build-algorithm-audit
+    ;;
+  status)
+    exec "$PYTHON_BIN" -m yuho_auto_extract automation-status
+    ;;
+  annual)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract annual-refresh "$@"
+    ;;
+  roll-forward)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract roll-forward-year "$@"
+    ;;
+  web)
+    HOST="${YUHO_WEB_HOST:-127.0.0.1}"
+    PORT="${YUHO_WEB_PORT:-8765}"
+    exec "$PYTHON_BIN" -m yuho_auto_extract.web_api --host "$HOST" --port "$PORT"
+    ;;
+  cli)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract "$@"
+    ;;
+  *)
+    echo "使い方:"
+    echo "  ./yuho              完成表まで一括実行"
+    echo "  ./yuho run          完成表まで一括実行"
+    echo "  ./yuho menu         メニューを開く"
+    echo "  ./yuho test         テスト実行"
+    echo "  ./yuho init         設定Excelを生成"
+    echo "  ./yuho report       実行レポート生成"
+    echo "  ./yuho ai           AI投入用フォルダ生成"
+    echo "  ./yuho audit        アルゴリズム監査パック生成"
+    echo "  ./yuho status       年次自動化・レビュー完了判定を確認"
+    echo "  ./yuho annual       年次取得ジョブを実行"
+    echo "  ./yuho roll-forward 会社年度マスターをロールフォワード"
+    echo "  ./yuho web          ローカルWebアプリ起動"
+    echo "  ./yuho cli --help   詳細CLIヘルプ"
+    exit 2
+    ;;
+esac

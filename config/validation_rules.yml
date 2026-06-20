@@ -1,0 +1,44 @@
+rules:
+  sum_building_orders:
+    description: 建築受注高の内訳合計
+    left: building_orders_total
+    right_sum:
+      - building_orders_private
+      - building_orders_government
+      - building_orders_overseas
+    tolerance_pct: 0.01
+    tolerance_abs: 10
+
+  backlog_equation:
+    description: 繰越高の整合性
+    formula: previous_backlog + current_orders - completed_work ~= next_backlog
+    tolerance_pct: 0.03
+    tolerance_abs: 50
+
+  expense_less_than_sga:
+    description: 交際費・寄付金・広告宣伝費は販管費以下
+    fields:
+      - entertainment_expense
+      - donation_expense
+      - advertising_expense
+    upper_bound: sga_expense
+
+  yoy_anomaly:
+    description: 前年比異常値
+    threshold_pct: 0.50
+    fields_apply_to:
+      - building_orders_total
+      - completed_building
+      - backlog_building_next
+      - domestic_building_orders_total
+      - domestic_completed_building
+      - domestic_backlog_building_next
+      - segment_orders_building
+      - segment_orders_civil
+      - segment_orders_domestic_building
+      - segment_orders_domestic_civil
+      - segment_orders_overseas_building
+      - segment_orders_overseas_civil
+      - segment_orders_overseas_construction
+      - rd_expense
+      - advertising_expense

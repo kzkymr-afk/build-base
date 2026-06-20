@@ -1,0 +1,62 @@
+storage:
+  strategy: local_lake_then_duckdb
+  raw_dir: data/raw
+  staging_dir: data/staging
+  mart_dir: data/marts
+  generated_outputs_dir: data/final
+  canonical_note: "data/final は成果物。長期保管・横断分析の正本は raw/staging/marts 側に置く。"
+
+sources:
+  - id: edinet_annual_securities_report
+    name: 有価証券報告書
+    enabled: true
+    status: active
+    acquisition_mode: edinet_api
+    cadence: annual
+    canonical_store: data/marts/edinet_annual
+    raw_store: data/raw/documents
+    key_columns:
+      - company_year_id
+      - field_id
+      - source_doc_id
+
+  - id: edinet_quarterly_disclosures
+    name: 四半期・半期等のEDINET開示
+    enabled: false
+    status: planned
+    acquisition_mode: edinet_api
+    cadence: quarterly_or_semiannual
+    canonical_store: data/marts/edinet_quarterly
+    raw_store: data/raw/quarterly_documents
+    note: "現行の有報抽出とは別スキーマで受け、年度有報と混ぜない。"
+
+  - id: mlit_construction_statistics
+    name: 国土交通省統計
+    enabled: false
+    status: planned
+    acquisition_mode: manual_or_scripted_download
+    cadence: monthly_or_annual
+    canonical_store: data/marts/mlit_statistics
+    raw_store: data/raw/mlit_statistics
+    note: "指定統計ごとに表定義・単位・更新周期を別管理する。"
+
+  - id: company_factbooks
+    name: ゼネコン各社ファクトブック
+    enabled: false
+    status: planned
+    acquisition_mode: manual_file_drop
+    cadence: annual
+    canonical_store: data/marts/company_factbooks
+    raw_store: data/raw/factbooks
+    note: "PDF/Excel/HTMLが混在する前提で、会社・年度・ページ/シート単位の証跡を保持する。"
+
+  - id: peer_excel
+    name: 同業他社情報Excel
+    enabled: false
+    status: planned
+    acquisition_mode: user_supplied_excel
+    cadence: ad_hoc
+    canonical_store: data/marts/peer_excel
+    raw_store: data/raw/user_supplied/peer_excel
+    note: "ユーザー提供Excelは原本をrawに保存し、取り込み後の列定義をstagingで固定する。"
+

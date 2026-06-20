@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yuho-auto-extract"
+version = "0.11.0"
+description = "YuhoLens: local EDINET/XBRL workbench for auditable securities-report extraction."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "requests>=2.31",
+  "PyYAML>=6.0",
+  "beautifulsoup4>=4.12",
+  "pandas>=2.0",
+  "pyarrow>=14.0",
+  "openpyxl>=3.1",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+yuho-auto-extract = "yuho_auto_extract.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

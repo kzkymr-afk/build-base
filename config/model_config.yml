@@ -1,0 +1,5 @@
+edinet:
+  base_url: https://api.edinet-fsa.go.jp/api/v2
+  request_timeout_seconds: 30
+  retry_count: 3
+  retry_backoff_seconds: 2

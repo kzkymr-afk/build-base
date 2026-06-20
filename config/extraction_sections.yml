@@ -1,0 +1,159 @@
+orders_backlog:
+  description: 受注高、完成工事高、繰越高
+  heading_keywords:
+  - 受注高
+  - 完成工事高
+  - 繰越高
+  - 工事受注高
+  table_keywords:
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  target_fields:
+  - building_orders_total
+  - building_orders_private
+  - building_orders_government
+  - building_orders_overseas
+  - completed_building
+  - backlog_building_next
+sales_style_orders:
+  description: 特命・競争の建築受注比率
+  heading_keywords:
+  - 特命
+  - 競争
+  - 受注方法別
+  table_keywords:
+  - 特命
+  - 競争
+  - 建築
+  target_fields:
+  - building_orders_special_contract_ratio
+  - building_orders_competitive_ratio
+segment_orders:
+  description: セグメント別受注実績
+  heading_keywords:
+  - 受注実績
+  - セグメントの名称
+  - 受注高は
+  table_keywords:
+  - セグメントの名称
+  - 建築事業
+  - 土木事業
+  - 国内建築
+  - 国内土木
+  - 海外建設
+  target_fields:
+  - segment_orders_building
+  - segment_orders_civil
+  - segment_orders_domestic_building
+  - segment_orders_domestic_civil
+  - segment_orders_overseas_building
+  - segment_orders_overseas_civil
+  - segment_orders_overseas_construction
+review_average_age:
+  description: 'レビュー由来ヒント: 平均年齢'
+  heading_keywords:
+  - 従業員の状況
+  - ５．従業員の状況
+  - ５【従業員の状況】
+  - ５ 【従業員の状況】
+  table_keywords:
+  - 提出会社の状況
+  - 平均年齢（歳）
+  - 平均年齢
+  target_fields:
+  - average_age
+review_average_salary:
+  description: 'レビュー由来ヒント: 平均給与'
+  heading_keywords:
+  - 従業員の状況
+  - ５ 【従業員の状況】
+  table_keywords:
+  - 提出会社の状況
+  - 平均年間給与
+  - 平均給与
+  target_fields:
+  - average_salary
+review_rd_expense:
+  description: 'レビュー由来ヒント: 研究開発費'
+  heading_keywords: []
+  table_keywords:
+  - 研究開発費
+  target_fields:
+  - rd_expense
+review_average_tenure:
+  description: 'レビュー由来ヒント: 平均勤続年数'
+  heading_keywords:
+  - 従業員の状況
+  table_keywords:
+  - 提出会社の状況
+  - 平均勤続年数
+  target_fields:
+  - average_tenure
+review_cost_expense:
+  description: 'レビュー由来ヒント: 経費'
+  heading_keywords:
+  - 【完成工事原価報告書】Ⅳ 経費
+  table_keywords:
+  - 経費
+  target_fields:
+  - cost_expense
+review_cost_subcontract:
+  description: 'レビュー由来ヒント: 外注費'
+  heading_keywords: []
+  table_keywords:
+  - 外注費
+  target_fields:
+  - cost_subcontract
+review_gross_profit_consolidated:
+  description: 'レビュー由来ヒント: 売上総利益_連結'
+  heading_keywords: []
+  table_keywords:
+  - 売上総利益_連結
+  target_fields:
+  - gross_profit_consolidated
+review_cost_labor:
+  description: 'レビュー由来ヒント: 労務費'
+  heading_keywords: []
+  table_keywords:
+  - 労務費
+  target_fields:
+  - cost_labor
+review_cost_materials:
+  description: 'レビュー由来ヒント: 材料費'
+  heading_keywords: []
+  table_keywords:
+  - 材料費
+  target_fields:
+  - cost_materials
+review_gross_profit_standalone:
+  description: 'レビュー由来ヒント: 売上総利益_単独'
+  heading_keywords: []
+  table_keywords:
+  - 売上総利益_単独
+  target_fields:
+  - gross_profit_standalone
+review_cash_and_deposits_consolidated:
+  description: 'レビュー由来ヒント: 現金及び預金_連結'
+  heading_keywords: []
+  table_keywords:
+  - 現金及び預金_連結
+  target_fields:
+  - cash_and_deposits_consolidated
+review_advertising_expense:
+  description: 'レビュー由来ヒント: 広告宣伝費'
+  heading_keywords: []
+  table_keywords:
+  - 広告宣伝費
+  review_table_keywords: []
+  review_row_labels:
+  - 広告宣伝費
+  review_row_labels_by_field:
+    advertising_expense:
+    - 広告宣伝費
+  review_units_by_field:
+    advertising_expense: 百万円
+  target_fields:
+  - advertising_expense

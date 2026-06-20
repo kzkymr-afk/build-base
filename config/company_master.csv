@@ -1,0 +1,22 @@
+operating_company_id,operating_company_name,edinet_code,securities_code,fiscal_year_end_month,valid_from_year,valid_to_year,default_data_scope,notes
+MAEDA,前田建設工業,E00051,1824,3,2015,2024,standalone,EDINET APIで確認。2021年度以降は開示主体INFRの文書から抽出
+SMCC,三井住友建設,E00085,1821,3,2015,2024,standalone,EDINET APIで確認
+INFR,インフロニア・ホールディングス,E36723,5076,3,2021,2024,consolidated,EDINET APIで確認。事業会社表には混在させない
+KAJIMA,鹿島建設,E00058,1812,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+TAISEI,大成建設,E00052,1801,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+OBAYASHI,大林組,E00055,1802,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+SHIMIZU,清水建設,E00053,1803,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+TAKENAKA,竹中工務店,E00169,,12,2015,2024,standalone,EDINET APIで2023年12月期有価証券報告書を確認。非上場
+TODA,戸田建設,E00147,1860,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+NISHIMATSU,西松建設,E00060,1820,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+ANDO_HAZAMA,安藤・間,E00317,1719,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+PENTA,五洋建設,E00086,1893,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+KUMAGAI,熊谷組,E00056,1861,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+HASEKO,長谷工コーポレーション,E00090,1808,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+TOKYU,東急建設,E00316,1720,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+OKUMURA,奥村組,E00083,1833,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+TOA,東亜建設工業,E00080,1885,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+ZENITAKA,錢高組,E00069,1811,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+ASANUMA,淺沼組,E00120,1852,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+MATSUI,松井建設,E00064,1810,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
+KITANO,北野建設,E00175,1866,3,2015,2024,standalone,EDINET APIで2024年有価証券報告書を確認
