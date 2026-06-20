@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yuho-auto-extract"
 version = "0.11.0"
-description = "YuhoLens: local EDINET/XBRL workbench for auditable securities-report extraction."
+description = "BuildBase: local workbench for auditable construction-industry data extraction and analysis."
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [

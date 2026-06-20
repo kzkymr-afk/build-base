@@ -1,5 +1,5 @@
 {
-  "name": "yuho-lens-web",
+  "name": "build-base-web",
   "private": true,
   "version": "0.11.0",
   "type": "module",

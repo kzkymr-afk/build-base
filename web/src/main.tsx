@@ -451,8 +451,8 @@ function App() {
         <div className="brand">
           <span className="brand-mark">Y</span>
           <div>
-            <strong>YuhoLens</strong>
-            <small>有報レンズ</small>
+            <strong>BuildBase</strong>
+            <small>Construction Data Workbench</small>
           </div>
         </div>
         <nav>
