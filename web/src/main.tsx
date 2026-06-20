@@ -449,7 +449,7 @@ function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">Y</span>
+          <span className="brand-mark">B</span>
           <div>
             <strong>BuildBase</strong>
             <small>Construction Data Workbench</small>
