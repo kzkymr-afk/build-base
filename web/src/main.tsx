@@ -391,9 +391,13 @@ function useOptions() {
   const [options, setOptions] = React.useState<Options | null>(null);
   const [error, setError] = React.useState('');
 
-  React.useEffect(() => {
+  const refresh = React.useCallback(() => {
     api<Options>('/api/options').then(setOptions).catch((err) => setError(String(err)));
   }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const fieldLabels = React.useMemo(() => {
     const labels: Record<string, string> = { ...baseColumnLabels };
@@ -403,7 +407,7 @@ function useOptions() {
     return labels;
   }, [options]);
 
-  return { options, fieldLabels, error };
+  return { options, fieldLabels, error, refresh };
 }
 
 function useStockOptions() {
@@ -2285,17 +2289,19 @@ function ReviewPanel({
   const [selected, setSelected] = React.useState<Row | null>(null);
   const [decision, setDecision] = React.useState('accept');
   const [correctedValue, setCorrectedValue] = React.useState('');
+  const [fieldNameDraft, setFieldNameDraft] = React.useState('');
   const [note, setNote] = React.useState('');
   const [notApplicableScope, setNotApplicableScope] = React.useState('from_selected_year');
   const [message, setMessage] = React.useState('');
   const [panelError, setPanelError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  const [savingFieldName, setSavingFieldName] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
   const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
   const [automationError, setAutomationError] = React.useState('');  const editorRef = React.useRef<HTMLElement | null>(null);
   const autoSelectedTargetRef = React.useRef('');
-  const { options, fieldLabels } = useOptions();
+  const { options, fieldLabels, refresh: refreshOptions } = useOptions();
   const jobRunning = job?.status === 'running';
 
   React.useEffect(() => {
@@ -2366,6 +2372,7 @@ function ReviewPanel({
     setSelected(row);
     setDecision(existingDecision || (extractedValue ? 'accept' : 'correct'));
     setCorrectedValue(String(row.corrected_value || row.extracted_value || ''));
+    setFieldNameDraft(String(row.field_name_ja || ''));
     setNote(String(row.reviewer_note || ''));
     setMessage(row.review_saved === 'yes' ? '保存済みレビューを読み込みました。修正して保存すると上書きされます。' : '');
     setPanelError('');
@@ -2429,6 +2436,42 @@ function ReviewPanel({
     }
   }
 
+  async function saveFieldName() {
+    if (!selected) return;
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。作業ログの完了を待ってから項目名を更新してください。');
+      return;
+    }
+    const fieldIdValue = String(selected.field_id || '').trim();
+    const nextName = fieldNameDraft.trim();
+    const currentName = String(selected.field_name_ja || '').trim();
+    if (!fieldIdValue || !nextName || nextName === currentName) return;
+    setSavingFieldName(true);
+    setPanelError('');
+    try {
+      await api(`/api/field-definitions/${encodeURIComponent(fieldIdValue)}`, {
+        method: 'POST',
+        body: JSON.stringify({ updates: { field_name_ja: nextName } })
+      });
+      try {
+        await api(`/api/concepts/${encodeURIComponent(fieldIdValue)}`, {
+          method: 'POST',
+          body: JSON.stringify({ updates: { concept_name_ja: nextName } })
+        });
+      } catch {
+        // field_definitionだけに存在する項目もあるため、概念同期の失敗は表示名更新自体を妨げない。
+      }
+      setSelected({ ...selected, field_name_ja: nextName });
+      refreshOptions();
+      loadReviewQueue();
+      setMessage(`項目名を更新しました: ${fieldIdValue} → ${nextName}`);
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setSavingFieldName(false);
+    }
+  }
+
   async function applyReview() {
     if (jobRunning) {
       setPanelError('ジョブ実行中です。作業ログの完了を待ってから最終反映してください。');
@@ -2458,6 +2501,7 @@ function ReviewPanel({
     const fieldLabel = String(selected.field_name_ja || fieldIdValue);
     const fiscalYearValue = yearFromReviewRow(selected);
     const range = notApplicableRange(notApplicableScope, fiscalYearValue);
+    const defaultReason = `${selectedCompanyId} / ${fieldLabel} は同業比較の分析項目として対象外`;
     const ok = window.confirm(`${selectedCompanyId} の${range.label}について「${fieldLabel}」を対象外として保存します。よろしいですか？`);
     if (!ok) return;
     setSaving(true);
@@ -2476,7 +2520,7 @@ function ReviewPanel({
           field_id: fieldIdValue,
           start_year: range.startYear,
           end_year: range.endYear,
-          note: note || `${selectedCompanyId} は持株会社等であり、この項目は同業ゼネコン比較の対象外`
+          note: note || defaultReason
         })
       });
       setDecision('not_applicable');
@@ -2668,6 +2712,19 @@ function ReviewPanel({
               <dt>反映値</dt>
               <dd>{String(selected.applied_value || '-')}</dd>
             </dl>
+            <div className="field-name-editor">
+              <label>項目名</label>
+              <input value={fieldNameDraft} onChange={(e) => setFieldNameDraft(e.target.value)} />
+              <button
+                type="button"
+                className="secondary"
+                onClick={saveFieldName}
+                disabled={savingFieldName || jobRunning || !fieldNameDraft.trim() || fieldNameDraft.trim() === String(selected.field_name_ja || '').trim()}
+              >
+                {savingFieldName ? '項目名更新中...' : '項目名を更新'}
+              </button>
+              <p className="hint">値ではなく項目名が誤っている場合はここで直します。field_definition.csv と概念名を更新し、抽出値やレビュー判定は変更しません。</p>
+            </div>
             {isEditingSavedReview && <p className="hint">この行は保存済みレビューです。内容を直して保存すると同じ会社年度・項目を上書きします。</p>}
             <label>判定</label>
             <select value={decision} onChange={(e) => setDecision(e.target.value)}>
@@ -2680,10 +2737,10 @@ function ReviewPanel({
             <input value={correctedValue} onChange={(e) => setCorrectedValue(e.target.value)} disabled={decision !== 'correct'} />
             <label>メモ（任意）</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={5} />
-            <p className="hint">保存すると正しい値として記録されます。根拠やラベルが分かる場合だけメモに補足してください。</p>
+            <p className="hint">値が正しいなら accept/correct、値が誤りなら reject、項目を採用しないなら not_applicable を使ってください。項目名だけが誤っている場合は上の「項目名を更新」で直します。</p>
             {decision === 'correct' && !correctedValue.trim() && <p className="hint">修正値を入力すると保存できます。</p>}
             {decision === 'accept' && !extractedValue && <p className="hint">抽出値が空の行は correct で修正値を入力してください。</p>}
-            {decision === 'not_applicable' && <p className="hint">対象外は値を作らず、レビュー済みとして扱います。持株会社など項目自体が存在しない場合に使ってください。</p>}
+            {decision === 'not_applicable' && <p className="hint">対象外は値を作らず、レビュー済みとして扱います。この会社・年度では項目を採用しない場合に使ってください。項目名の誤りは上の入力欄で修正します。</p>}
             {selectedCompanyId && (
               <div className="not-applicable-scope">
                 <label>会社・項目対象外の範囲</label>
@@ -2695,7 +2752,7 @@ function ReviewPanel({
                   <option value="before_selected_year">{selectedFiscalYear ? `${selectedFiscalYear - 1}年度以前（当年を含まない）` : '選択前年度以前'}</option>
                   <option value="all_years">全年度</option>
                 </select>
-                <p className="hint">子会社化後だけ項目が消える場合は、境目の年度を含めるなら「選択年度以降」、境目の翌年度からなら「翌年度以降」を使ってください。</p>
+                <p className="hint">選択中の会社・項目について、指定範囲のレビュー候補をまとめて not_applicable にします。子会社化後だけ項目が消える場合や、この会社では比較対象外にする場合に使ってください。</p>
               </div>
             )}
             {panelError && <InlineError message={panelError} />}

@@ -68,7 +68,7 @@ nc_04b3ae6b17d68200,平均臨時雇用人員（全体）,human_capital,,,current
 nc_140bbe49a3c86b7a,１株当たり親会社所有者帰属持分_IFRS,financial_position,,,current_year,XBRL_CSV,EquityToAssetRatioIFRSSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
 nc_25e977441b241f55,１株当たり純資産額_連結,financial_position,,consolidated,current_year,XBRL_CSV,NetAssetsPerShareSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
 nc_2ac31242cd2b2efe,不動産売上総利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,GrossProfitRealEstateSalesGP,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
-nc_2d3b60309c0b380a,調査研究費及び販売費及び一般管理費_連結,expense,百万円,consolidated,current_year,XBRL_CSV,ResearchStudyExpensesSGA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_2d3b60309c0b380a,調査研究費_連結,expense,百万円,consolidated,current_year,XBRL_CSV,ResearchStudyExpensesSGA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
 nc_2fc2dfb77cc08cc5,平均臨時雇用人員,human_capital,,segment,current_year,XBRL_CSV,AverageNumberOfTemporaryWorkers,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
 nc_35dfd11c1fe8a2c1,税引前利益（IFRS）,performance,百万円,,current_year,XBRL_CSV,ProfitLossBeforeTaxIFRSSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
 nc_37e49b75d7814861,不動産事業等売上高_建設セグメント,segment,百万円,segment,current_year,XBRL_CSV,NetSalesOfRealEstateBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
