@@ -9,7 +9,7 @@ from typing import Callable, Dict, Optional
 
 from yuho_auto_extract import __main__ as cli
 from yuho_auto_extract.io_utils import prefer_existing_table, read_table, write_table
-from yuho_auto_extract.services import automation, review_learning_impact, reviews, rule_candidates
+from yuho_auto_extract.services import automation, reviews
 
 
 LogCallback = Callable[[str], None]
@@ -31,8 +31,6 @@ def import_manual_technicians(root: Path, log: Optional[LogCallback] = None) -> 
 def reextract_with_review(root: Path, log: Optional[LogCallback] = None) -> int:
     """Re-extract using current rules, then apply saved human review decisions."""
     _prepare(root)
-    before_coverage = review_learning_impact.capture_field_coverage(root)
-    learning_result = _sync_review_learning_rules(root, log)
     code = _call("locate-sections", cli.cmd_locate_sections, root, argparse.Namespace(), log)
     if code:
         return code
@@ -44,15 +42,6 @@ def reextract_with_review(root: Path, log: Optional[LogCallback] = None) -> int:
     code = apply_review(root, log=log)
     if code:
         return code
-    impact = review_learning_impact.write_review_learning_impact(root, before_coverage, learning_result)
-    summary = impact.get("summary", {})
-    if log:
-        log(
-            "[review-learning-impact] "
-            f"improved_fields={summary.get('improved_fields', 0)} "
-            f"total_filled_delta={summary.get('total_filled_delta', 0)} "
-            f"path={impact.get('markdown_path', '')}"
-        )
     return 0
 
 
@@ -237,63 +226,6 @@ def build_xbrl_fact_store(root: Path, log: Optional[LogCallback] = None) -> int:
     return _call("xbrl-fact-store", cli.cmd_build_xbrl_fact_store, root, args, log)
 
 
-def build_major_financial_evidence(root: Path, log: Optional[LogCallback] = None) -> int:
-    """Refresh XBRL Fact Store, then build AI-reviewable evidence packs for major financial fields."""
-    _prepare(root)
-    code = _call("xbrl-fact-store", cli.cmd_build_xbrl_fact_store, root, argparse.Namespace(doc_id="", company_year_id=""), log)
-    if code:
-        return code
-    return _call("build-major-financial-evidence", cli.cmd_build_major_financial_evidence, root, argparse.Namespace(chunk_size=80), log)
-
-
-def build_xbrl_discovered_metrics(root: Path, log: Optional[LogCallback] = None) -> int:
-    """Refresh XBRL Fact Store, then catalog every numeric current-year XBRL metric."""
-    _prepare(root)
-    return _call("prepare-xbrl-discovered-metrics", cli.cmd_prepare_xbrl_discovered_metrics, root, argparse.Namespace(include_prior_periods=False), log)
-
-
-def compare_major_financial_ai_decisions(root: Path, log: Optional[LogCallback] = None) -> int:
-    """Compare manually pasted AI candidate decisions without changing final outputs."""
-    _prepare(root)
-    args = argparse.Namespace(
-        decisions="data/ai_evidence/major_financial/ai_decisions.jsonl",
-        output="data/reports/major_financial_ai_decision_compare.csv",
-    )
-    return _call("compare-major-financial-ai-decisions", cli.cmd_compare_major_financial_ai_decisions, root, args, log)
-
-
-def _sync_review_learning_rules(root: Path, log: Optional[LogCallback] = None) -> Dict[str, object]:
-    generated = rule_candidates.generate_rule_candidates(root)
-    status_counts = generated.get("status_counts", {})
-    active_rows = generated.get("rows", [])
-    auto_field_ids = [
-        str(row.get("field_id") or "").strip()
-        for row in active_rows
-        if str(row.get("confidence") or "").strip().lower() == "high"
-        and str(row.get("needs_manual_check") or "").strip().lower() == "no"
-    ]
-    auto_field_ids = [field_id for field_id in dict.fromkeys(auto_field_ids) if field_id]
-    if log:
-        log(
-            "[review-learning] candidates "
-            f"active={status_counts.get('active', 0)} "
-            f"applied={status_counts.get('applied', 0)} "
-            f"all={status_counts.get('all', 0)}"
-        )
-    if not auto_field_ids:
-        if log:
-            log("[review-learning] no high-confidence candidates to auto-apply")
-        return {"generated": generated, "auto_field_ids": [], "applied_result": {}}
-    result = rule_candidates.apply_rule_candidates(root, auto_field_ids)
-    if log:
-        log(
-            "[review-learning] auto-applied "
-            f"fields={','.join(auto_field_ids)} "
-            f"updated_sections={','.join(result.get('updated_sections', [])) or '-'}"
-        )
-    return {"generated": generated, "auto_field_ids": auto_field_ids, "applied_result": result}
-
-
 def rebuild_report(root: Path, log: Optional[LogCallback] = None) -> int:
     """Regenerate run report, field coverage, and AI bundle."""
     _prepare(root)
@@ -317,11 +249,6 @@ def apply_review(root: Path, log: Optional[LogCallback] = None, reviewed: str = 
             if log:
                 log(f"[review-applied] marked={result['updated']} total={result['total']}")
     return 0
-
-
-def build_ai_bundle_only(root: Path, log: Optional[LogCallback] = None) -> int:
-    _prepare(root)
-    return _call("build-ai-bundle", cli.cmd_build_ai_bundle, root, argparse.Namespace(), log)
 
 
 def build_algorithm_audit(root: Path, log: Optional[LogCallback] = None) -> int:

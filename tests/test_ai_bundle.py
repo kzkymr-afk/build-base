@@ -41,7 +41,7 @@ class AIBundleTests(unittest.TestCase):
             self.assertNotIn("final_master_wide.xlsx", names)
             self.assertIn("空欄は0ではありません", (bundle / "AI_README.md").read_text(encoding="utf-8"))
 
-    def test_build_algorithm_audit_bundle_flags_low_evidence_global_rule(self):
+    def test_build_algorithm_audit_bundle_flags_current_algorithm_risks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_table(
@@ -104,20 +104,6 @@ class AIBundleTests(unittest.TestCase):
                 ],
             )
             write_table(
-                root / "data" / "review" / "rule_candidates.csv",
-                [
-                    {
-                        "field_id": "average_salary",
-                        "field_name_ja": "平均給与",
-                        "evidence_count": "1",
-                        "company_year_ids": "A_2024",
-                        "generality": "全社共通",
-                        "needs_manual_check": "yes",
-                        "recommended_action": "LOCAL_TABLE rule",
-                    }
-                ],
-            )
-            write_table(
                 root / "data" / "review" / "review_resolved.csv",
                 [
                     {
@@ -136,11 +122,11 @@ class AIBundleTests(unittest.TestCase):
 
             self.assertTrue((audit_dir / "ALGORITHM_AUDIT_PROMPT.md").exists())
             self.assertTrue((audit_dir / "CODEX_MAINTENANCE_PROMPT.md").exists())
-            self.assertIn("レビュー由来のルール追加", result["prompt"])
+            self.assertIn("抽出設定", result["prompt"])
             self.assertIn("コード妥当性の確認をユーザーに求めず", result["prompt"])
             self.assertIn("実装、テスト、差分説明", result["prompt"])
             self.assertGreaterEqual(result["summary"]["risk_flags"], 3)
-            self.assertTrue(any(row["issue"] == "single_evidence_global_rule" for row in risk_flags))
+            self.assertTrue(any(row["issue"] == "low_coverage" for row in risk_flags))
             self.assertTrue(any(row["issue"] == "saved_review_not_applied" for row in risk_flags))
             self.assertTrue((audit_dir / "config" / "field_definition.csv").exists())
 

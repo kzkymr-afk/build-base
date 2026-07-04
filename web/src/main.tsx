@@ -34,7 +34,6 @@ type Page<T extends Row = Row> = {
   page_size: number;
   total: number;
   total_pages: number;
-  status_counts?: RuleCandidateStatusCounts;
   review_category_counts?: Record<string, number>;
   review_category_labels?: Record<string, string>;
 };
@@ -173,56 +172,6 @@ type FieldDefinitionUpdateResult = {
   xlsx_written: string;
 };
 
-type XbrlDiscoveredMetricRow = Row & {
-  discovered_metric_id: string;
-  discovered_metric_label: string;
-  element_local_name: string;
-  normalized_scope: string;
-  period_bucket: string;
-  unit: string;
-  value_count: number;
-  company_year_count: number;
-  matched_field_ids: string;
-  target_field_id: string;
-  target_field_name_ja: string;
-  mapping_status: string;
-  mapping_status_label: string;
-  mapping_note: string;
-  sample_value_display: string;
-  sample_company_year_id: string;
-};
-
-type XbrlDiscoveredMetricsResult = {
-  rows: XbrlDiscoveredMetricRow[];
-  columns: string[];
-  page: number;
-  page_size: number;
-  total: number;
-  total_pages: number;
-  field_options: Array<{ field_id: string; field_name_ja: string; category: string; target_unit: string; label: string }>;
-  status_options: Array<{ id: string; label: string }>;
-  mapping_counts: Record<string, number>;
-  mapping_path: string;
-};
-
-type XbrlMetricMappingResult = {
-  discovered_metric_id: string;
-  mapping_status: string;
-  target_field_id: string;
-  target_field_name_ja: string;
-  changed: boolean;
-  mapping_path: string;
-};
-
-type XbrlMetricBulkMappingResult = {
-  requested: number;
-  changed: number;
-  mapping_status: string;
-  target_field_id: string;
-  target_field_name_ja: string;
-  mapping_path: string;
-};
-
 type FieldPreset = {
   id: string;
   name: string;
@@ -301,29 +250,6 @@ type CellDetail = {
   audit_rows: Row[];
   review_rows: Row[];
   resolved_rows: Row[];
-};
-
-type RuleCandidateApplyResult = {
-  applied_candidates: number;
-  updated_fields: Array<{ field_id: string; columns: string[] }>;
-  updated_sections: string[];
-  backups: string[];
-  warnings: string[];
-};
-
-type RuleCandidateStatusCounts = {
-  active: number;
-  applied: number;
-  all: number;
-};
-
-type RuleCandidateGenerateResult = {
-  path: string;
-  total: number;
-  all_total?: number;
-  applied_total?: number;
-  status_counts?: RuleCandidateStatusCounts;
-  rows: Row[];
 };
 
 type AlgorithmAuditResult = {
@@ -564,44 +490,6 @@ const designPresets: Record<DesignPreset, {
   },
 };
 
-const ruleCandidateLabels: Record<string, string> = {
-  field_id: 'field_id',
-  field_name_ja: '項目',
-  evidence_count: '証跡数',
-  company_year_ids: '会社年度',
-  proposed_xbrl_tags: 'XBRLタグ候補',
-  proposed_section_keywords: 'セクション候補',
-  proposed_tables: '表候補',
-  proposed_row_labels: '行ラベル候補',
-  proposed_scope: 'スコープ',
-  proposed_unit: '単位',
-  generality: '汎用性',
-  quotes: '引用',
-  reviewed_value_examples: '値の例',
-  learning_source: '学習元',
-  confidence: '信頼度',
-  inference_notes: '推定メモ',
-  candidate_status: '候補状態',
-  candidate_applied_at: '候補反映日時',
-  needs_manual_check: '要確認',
-  recommended_action: '反映先候補',
-  last_filled_delta: '前回改善',
-  last_review_queue_after: '前回レビュー残',
-  last_auto_applied: '前回自動反映',
-  last_applied_columns: '前回反映列',
-  last_applied_sections: '前回反映セクション'
-};
-
-const ruleCandidateListColumns = [
-  'field_name_ja',
-  'candidate_status',
-  'evidence_count',
-  'confidence',
-  'proposed_xbrl_tags',
-  'proposed_section_keywords',
-  'proposed_tables',
-  'recommended_action'
-];
 
 const reviewColumnLabels: Record<string, string> = {
   review_saved: '保存',
@@ -654,20 +542,6 @@ const fieldDefinitionListColumns = [
   'preferred_method'
 ];
 
-const xbrlMetricColumnLabels: Record<string, string> = {
-  mapping_status_label: '判断',
-  target_field_name_ja: 'BuildBase項目',
-  discovered_metric_label: '有報上の項目名',
-  element_local_name: '有報タグ',
-  normalized_scope: 'スコープ',
-  period_bucket: '期間',
-  unit: '単位',
-  value_count: '値数',
-  company_year_count: '会社年度',
-  matched_field_ids: '自動推定',
-  sample_value_display: 'サンプル値',
-  sample_company_year_id: 'サンプル'
-};
 
 const stockColumnLabels: Record<string, string> = {
   listed_company_id: '上場会社ID',
@@ -852,29 +726,6 @@ function reviewSavedLabel(value: unknown): string {
   return String(value || '') === 'yes' ? '保存済み' : '未保存';
 }
 
-function candidateStatusLabel(status: unknown): string {
-  return String(status || '').trim() === 'applied' ? '対応済み' : '未対応';
-}
-
-function formatRuleCandidateGenerateMessage(result: RuleCandidateGenerateResult): string {
-  const active = result.status_counts?.active ?? result.total ?? 0;
-  const applied = result.status_counts?.applied ?? result.applied_total ?? 0;
-  const all = result.status_counts?.all ?? result.all_total ?? result.total ?? 0;
-  if (all === 0) {
-    return '候補を更新しました: 全候補0件。accept/correctで保存された正しい値と、元の根拠テキストがそろうと候補化できます。';
-  }
-  if (active === 0 && applied > 0) {
-    return `候補を更新しました: 未対応0件 / 対応済み${applied}件 / 全候補${all}件。新規対応は不要です。対応済みタブに切り替えて履歴を表示します。`;
-  }
-  return `候補を更新しました: 未対応${active}件 / 対応済み${applied}件 / 全候補${all}件。`;
-}
-
-function nextRuleCandidateStatusAfterGenerate(result: RuleCandidateGenerateResult, currentStatus: string): string {
-  const activeCount = result.status_counts?.active ?? result.total ?? 0;
-  const appliedCount = result.status_counts?.applied ?? result.applied_total ?? 0;
-  return activeCount === 0 && appliedCount > 0 ? 'applied' : currentStatus;
-}
-
 function renderClampedText(value: unknown, className = '') {
   const text = String(value ?? '');
   return <span className={`clamped-cell ${className}`.trim()} title={text}>{text}</span>;
@@ -892,12 +743,7 @@ function renderCellValue(column: string, value: unknown) {
     const status = String(value || '').trim();
     const ok = status === 'applied' || status === 'rejected';
     return <span className={`pill ${ok ? 'pill-ok' : 'pill-warn'}`}>{appliedStatusLabel(value)}</span>;
-  }
-  if (column === 'candidate_status') {
-    const applied = String(value || '').trim() === 'applied';
-    return <span className={`pill ${applied ? 'pill-ok' : 'pill-warn'}`}>{candidateStatusLabel(value)}</span>;
-  }
-  if (COLLAPSED_TEXT_COLUMNS.has(column)) {
+  }  if (COLLAPSED_TEXT_COLUMNS.has(column)) {
     return renderClampedText(value);
   }
   return String(value ?? '');
@@ -1213,18 +1059,6 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
         onRun={() => startStock(false)}
         jobRunning={jobRunning}
       />
-      <MajorFinancialEvidencePanel
-        status={status}
-        onPrepare={() => start('/api/jobs/major-financial-evidence')}
-        onRefreshXbrl={() => start('/api/jobs/xbrl-fact-store')}
-        onCompare={() => start('/api/jobs/major-financial-ai-compare')}
-        jobRunning={jobRunning}
-      />
-      <XbrlDiscoveredMetricsPanel
-        status={status}
-        onBuild={() => start('/api/jobs/xbrl-discovered-metrics')}
-        jobRunning={jobRunning}
-      />
       <FileHealth status={status} />
       <JobLog job={job} />
     </section>
@@ -1433,138 +1267,6 @@ function XbrlFactStorePanel({
   );
 }
 
-function MajorFinancialEvidencePanel({
-  status,
-  onPrepare,
-  onRefreshXbrl,
-  onCompare,
-  jobRunning
-}: {
-  status: Status | null;
-  onPrepare: () => void;
-  onRefreshXbrl: () => void;
-  onCompare: () => void;
-  jobRunning: boolean;
-}) {
-  const files = status?.files || {};
-  const xbrlReady = Boolean(
-    files.xbrl_fact_store_manifest
-    && files.xbrl_fact_store_facts_json
-    && files.xbrl_fact_store_context_json
-  );
-  const manifestReady = Boolean(files.major_financial_evidence_manifest);
-  const factsReady = Boolean(files.major_financial_candidate_facts);
-  const groupsReady = Boolean(files.major_financial_candidate_groups);
-  const decisionsReady = Boolean(files.major_financial_ai_decisions);
-  const compareReady = Boolean(files.major_financial_ai_compare);
-  const evidenceReady = manifestReady && factsReady && groupsReady;
-  const ready = xbrlReady && evidenceReady;
-  const message = status
-    ? ready ? '主要財務項目の候補作成は完了しています。' : '主要財務項目の候補はまだ作成されていません。'
-    : '状態を読み込み中です。';
-
-  return (
-    <div className="panel automation-panel">
-      <div className="panel-head">
-        <div>
-          <h2>主要財務項目の候補</h2>
-          <p className="muted">{message}</p>
-        </div>
-        <span className={`badge ${ready ? 'succeeded' : 'pending'}`}>{ready ? '準備済み' : status ? '未準備' : '確認中'}</span>
-      </div>
-      <div className="automation-grid">
-        <div className="metric">
-          <small>有報データ整理</small>
-          <strong className={xbrlReady ? 'text-ok' : 'text-warn'}>{xbrlReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>manifest</small>
-          <strong className={manifestReady ? 'text-ok' : 'text-warn'}>{manifestReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>候補一覧</small>
-          <strong className={factsReady ? 'text-ok' : 'text-warn'}>{factsReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>項目別候補</small>
-          <strong className={groupsReady ? 'text-ok' : 'text-warn'}>{groupsReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>AI判断メモ</small>
-          <strong className={decisionsReady ? 'text-ok' : 'text-warn'}>{decisionsReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>AI判断比較</small>
-          <strong className={compareReady ? 'text-ok' : 'text-warn'}>{compareReady ? 'あり' : 'なし'}</strong>
-        </div>
-      </div>
-      <div className="toolbar annual-toolbar">
-        <button onClick={onPrepare} disabled={jobRunning}>主要財務の候補を作る</button>
-        <button className="secondary" onClick={onRefreshXbrl} disabled={jobRunning}>有報データだけ整理</button>
-        <button className="secondary" onClick={onCompare} disabled={jobRunning || !ready || !decisionsReady}>AI判断との照合レポート</button>
-      </div>
-    </div>
-  );
-}
-
-function XbrlDiscoveredMetricsPanel({
-  status,
-  onBuild,
-  jobRunning
-}: {
-  status: Status | null;
-  onBuild: () => void;
-  jobRunning: boolean;
-}) {
-  const files = status?.files || {};
-  const xbrlReady = Boolean(
-    files.xbrl_fact_store_manifest
-    && files.xbrl_fact_store_facts_json
-    && files.xbrl_fact_store_context_json
-  );
-  const manifestReady = Boolean(files.xbrl_discovered_metrics_manifest);
-  const catalogReady = Boolean(files.xbrl_discovered_metric_catalog);
-  const valuesReady = Boolean(files.xbrl_discovered_value_long);
-  const suggestionsReady = Boolean(files.xbrl_discovered_similarity_suggestions);
-  const ready = manifestReady && catalogReady && valuesReady;
-  const message = status
-    ? ready ? '有報の全項目候補は作成済みです。' : '有報の全項目候補はまだ作成されていません。'
-    : '状態を読み込み中です。';
-
-  return (
-    <div className="panel automation-panel">
-      <div className="panel-head">
-        <div>
-          <h2>有報の全項目候補</h2>
-          <p className="muted">{message}</p>
-        </div>
-        <span className={`badge ${ready ? 'succeeded' : 'pending'}`}>{ready ? '作成済み' : status ? '未作成' : '確認中'}</span>
-      </div>
-      <div className="automation-grid">
-        <div className="metric">
-          <small>有報データ整理</small>
-          <strong className={xbrlReady ? 'text-ok' : 'text-warn'}>{xbrlReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>項目一覧</small>
-          <strong className={catalogReady ? 'text-ok' : 'text-warn'}>{catalogReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>会社・年度別の値</small>
-          <strong className={valuesReady ? 'text-ok' : 'text-warn'}>{valuesReady ? 'あり' : 'なし'}</strong>
-        </div>
-        <div className="metric">
-          <small>似た項目</small>
-          <strong className={suggestionsReady ? 'text-ok' : 'text-warn'}>{suggestionsReady ? 'あり' : 'なし'}</strong>
-        </div>
-      </div>
-      <div className="toolbar annual-toolbar">
-        <button onClick={onBuild} disabled={jobRunning}>有報の全項目候補を作る</button>
-      </div>
-    </div>
-  );
-}
-
 function FileHealth({ status }: { status: Status | null }) {
   if (!status) return <Empty message="状態を読み込み中です。" />;
   return (
@@ -1618,7 +1320,7 @@ function ReviewTerminal({ job }: { job: Job | null }) {
       <div className="panel-head">
         <div>
           <h2>作業ログ</h2>
-          <p className="muted">候補反映、再取得、最終反映の進捗をここで確認できます。</p>
+          <p className="muted">再取得、最終反映の進捗をここで確認できます。</p>
         </div>
         <span className={`badge ${job?.status || ''}`}>{job?.status || 'idle'}</span>
       </div>
@@ -2014,328 +1716,7 @@ function FieldAdminPanel({ onUpdated }: { onUpdated: () => void }) {
           )}
         </div>
       </div>
-      <XbrlDiscoveredMetricsMapper selectedFieldId={selectedFieldId} onUpdated={onUpdated} />
     </section>
-  );
-}
-
-function XbrlDiscoveredMetricsMapper({
-  selectedFieldId,
-  onUpdated
-}: {
-  selectedFieldId: string;
-  onUpdated: () => void;
-}) {
-  const [search, setSearch] = React.useState('');
-  const [status, setStatus] = React.useState('');
-  const [targetFilter, setTargetFilter] = React.useState('');
-  const [page, setPage] = React.useState(1);
-  const [data, setData] = React.useState<XbrlDiscoveredMetricsResult | null>(null);
-  const [selected, setSelected] = React.useState<XbrlDiscoveredMetricRow | null>(null);
-  const [mappingTarget, setMappingTarget] = React.useState('');
-  const [mappingStatus, setMappingStatus] = React.useState('candidate');
-  const [mappingNote, setMappingNote] = React.useState('');
-  const [savingId, setSavingId] = React.useState('');
-  const [bulkSaving, setBulkSaving] = React.useState(false);
-  const [selectedMetricIds, setSelectedMetricIds] = React.useState<Set<string>>(new Set());
-  const [message, setMessage] = React.useState('');
-  const [error, setError] = React.useState('');
-
-  const refresh = React.useCallback(() => {
-    const params = new URLSearchParams({
-      page: String(page),
-      page_size: '50',
-      search,
-      mapping_status: status,
-      target_field_id: targetFilter
-    });
-    api<XbrlDiscoveredMetricsResult>(`/api/xbrl/discovered-metrics?${params}`)
-      .then((result) => {
-        setData(result);
-        setError('');
-        setSelected((current) => {
-          if (!current) return result.rows[0] || null;
-          return result.rows.find((row) => row.discovered_metric_id === current.discovered_metric_id) || result.rows[0] || null;
-        });
-      })
-      .catch((err) => setError(String(err)));
-  }, [page, search, status, targetFilter]);
-
-  React.useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  React.useEffect(() => {
-    if (!selected) {
-      setMappingTarget('');
-      setMappingStatus('candidate');
-      setMappingNote('');
-      return;
-    }
-    setMappingTarget(selected.target_field_id || selectedFieldId || firstTerm(selected.matched_field_ids));
-    setMappingStatus(selected.mapping_status === 'unmapped' ? 'candidate' : selected.mapping_status || 'candidate');
-    setMappingNote(selected.mapping_note || '');
-  }, [selected, selectedFieldId]);
-
-  async function saveMapping(nextStatus?: string) {
-    if (!selected) return;
-    const statusToSave = nextStatus || mappingStatus;
-    if ((statusToSave === 'candidate' || statusToSave === 'accepted') && !mappingTarget) {
-      setError('確認中または採用で保存する場合は、対応するBuildBase項目を選択してください。');
-      return;
-    }
-    setSavingId(selected.discovered_metric_id);
-    setError('');
-    setMessage('');
-    try {
-      const result = await api<XbrlMetricMappingResult>(
-        `/api/xbrl/discovered-metrics/${encodeURIComponent(selected.discovered_metric_id)}/mapping`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ target_field_id: mappingTarget, mapping_status: statusToSave, note: mappingNote })
-        }
-      );
-      setMessage(`${mappingStatusLabel(result.mapping_status)}として保存しました: ${result.target_field_name_ja || result.target_field_id || '対応先なし'}`);
-      onUpdated();
-      refresh();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSavingId('');
-    }
-  }
-
-  async function rejectSelectedMetrics() {
-    const metricIds = Array.from(selectedMetricIds);
-    if (!metricIds.length) {
-      setError('使わない項目を選択してください。');
-      return;
-    }
-    setBulkSaving(true);
-    setError('');
-    setMessage('');
-    try {
-      const result = await api<XbrlMetricBulkMappingResult>('/api/xbrl/discovered-metrics/mappings/bulk', {
-        method: 'POST',
-        body: JSON.stringify({
-          discovered_metric_ids: metricIds,
-          mapping_status: 'rejected',
-          note: 'まとめて使わない'
-        })
-      });
-      setMessage(`${result.changed}件を「使わない」にしました。`);
-      setSelectedMetricIds(new Set());
-      onUpdated();
-      refresh();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBulkSaving(false);
-    }
-  }
-
-  function toggleMetricSelection(row: Row) {
-    const metricId = String(row.discovered_metric_id || '');
-    if (!metricId) return;
-    setSelectedMetricIds((current) => {
-      const next = new Set(current);
-      if (next.has(metricId)) {
-        next.delete(metricId);
-      } else {
-        next.add(metricId);
-      }
-      return next;
-    });
-  }
-
-  function selectVisibleMetrics() {
-    if (!data?.rows.length) return;
-    setSelectedMetricIds((current) => {
-      const next = new Set(current);
-      for (const row of data.rows) {
-        if (row.discovered_metric_id) {
-          next.add(row.discovered_metric_id);
-        }
-      }
-      return next;
-    });
-  }
-
-  function clearMetricSelection() {
-    setSelectedMetricIds(new Set());
-  }
-
-  function updateSearch(value: string) {
-    setSearch(value);
-    setPage(1);
-  }
-
-  function updateStatus(value: string) {
-    setStatus(value);
-    setPage(1);
-  }
-
-  function updateTargetFilter(value: string) {
-    setTargetFilter(value);
-    setPage(1);
-  }
-
-  const columns = [
-    'mapping_status_label',
-    'target_field_name_ja',
-    'discovered_metric_label',
-    'element_local_name',
-    'normalized_scope',
-    'period_bucket',
-    'unit',
-    'value_count',
-    'company_year_count',
-    'matched_field_ids',
-    'sample_value_display',
-  ];
-  const counts = data?.mapping_counts || {};
-  const selectedKey = selected?.discovered_metric_id || '';
-  const selectedCount = selectedMetricIds.size;
-
-  return (
-    <div className="panel xbrl-mapper-panel">
-      <div className="panel-head">
-        <div>
-          <h2>有報から見つかった項目</h2>
-          <p className="muted">表記ゆれを、BuildBaseの項目へ結びます。</p>
-        </div>
-        <span className="badge pending">{data ? `${data.total}件` : '読み込み中'}</span>
-      </div>
-      <FilterBar>
-        <label className="filter-field">
-          <span>検索</span>
-          <input value={search} onChange={(e) => updateSearch(e.target.value)} placeholder="売上総利益、完成工事、GrossProfit..." />
-        </label>
-        <label className="filter-field small">
-          <span>状態</span>
-          <select value={status} onChange={(e) => updateStatus(e.target.value)}>
-            <option value="">全状態</option>
-            {(data?.status_options || []).map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="filter-field">
-          <span>BuildBase項目</span>
-          <select value={targetFilter} onChange={(e) => updateTargetFilter(e.target.value)}>
-            <option value="">全項目</option>
-            {(data?.field_options || []).map((field) => (
-              <option key={field.field_id} value={field.field_id}>{field.field_name_ja}</option>
-            ))}
-          </select>
-        </label>
-        <button className="ghost" type="button" onClick={refresh}>発見項目再読込</button>
-      </FilterBar>
-      <p className="hint">
-        未判断 {counts.unmapped ?? '-'} / 確認中 {counts.candidate ?? '-'} / 採用 {counts.accepted ?? '-'} / 別管理 {counts.separate ?? '-'} / 使わない {counts.rejected ?? '-'}
-      </p>
-      <div className="toolbar bulk-toolbar">
-        <span className="selection-count">選択中 {selectedCount}件</span>
-        <button type="button" className="ghost" onClick={selectVisibleMetrics} disabled={!data?.rows.length}>表示中を全選択</button>
-        <button type="button" className="ghost" onClick={clearMetricSelection} disabled={!selectedCount}>選択解除</button>
-        <button type="button" className="secondary danger-action" onClick={rejectSelectedMetrics} disabled={!selectedCount || bulkSaving}>
-          {bulkSaving ? '保存中...' : '選択をまとめて使わない'}
-        </button>
-      </div>
-      {error && <InlineError message={error} />}
-      {message && <div className="alert success-alert">{message}</div>}
-      <div className="field-admin-layout">
-        <div>
-          {data ? (
-            <>
-              <DataTable
-                data={data.rows as unknown as Row[]}
-                columns={columns}
-                columnLabels={xbrlMetricColumnLabels}
-                onRowClick={(row) => setSelected(row as XbrlDiscoveredMetricRow)}
-                selectedRowKey={selectedKey}
-                selectedRowKeys={selectedMetricIds}
-                getRowKey={(row) => String(row.discovered_metric_id || '')}
-                selectableRows
-                onRowSelectionToggle={toggleMetricSelection}
-                compact
-                clampAllCells
-              />
-              <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
-            </>
-          ) : (
-            <Empty message="有報から見つかった項目を読み込み中です。" />
-          )}
-        </div>
-        <div className="field-editor xbrl-mapping-editor">
-          {selected ? (
-            <>
-              <div className="panel-head">
-                <div>
-                  <h2>{selected.discovered_metric_label}</h2>
-                  <p className="muted">{selected.element_local_name}</p>
-                </div>
-                <span className={`badge ${selected.mapping_status === 'accepted' ? 'succeeded' : 'pending'}`}>
-                  {selected.mapping_status_label || mappingStatusLabel(selected.mapping_status)}
-                </span>
-              </div>
-              <div className="detail-grid">
-                <div>
-                  <small>会社年度数</small>
-                  <strong>{selected.company_year_count ?? '-'}</strong>
-                </div>
-                <div>
-                  <small>値数</small>
-                  <strong>{selected.value_count ?? '-'}</strong>
-                </div>
-                <div>
-                  <small>スコープ</small>
-                  <strong>{selected.normalized_scope || '-'}</strong>
-                </div>
-                <div>
-                  <small>単位</small>
-                  <strong>{selected.unit || '-'}</strong>
-                </div>
-              </div>
-              <label>
-                <span>対応するBuildBase項目</span>
-                <select value={mappingTarget} onChange={(e) => setMappingTarget(e.target.value)}>
-                  <option value="">未選択</option>
-                  {(data?.field_options || []).map((field) => (
-                    <option key={field.field_id} value={field.field_id}>{field.field_name_ja} / {field.field_id}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>判断</span>
-                <select value={mappingStatus} onChange={(e) => setMappingStatus(e.target.value)}>
-                  {(data?.status_options || []).filter((item) => item.id !== 'unmapped').map((item) => (
-                    <option key={item.id} value={item.id}>{item.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                <span>メモ</span>
-                <textarea value={mappingNote} onChange={(e) => setMappingNote(e.target.value)} rows={3} placeholder="表記ゆれ、統合判断、使わない理由など" />
-              </label>
-              {selected.matched_field_ids && <p className="hint">自動推定された対応先: {selected.matched_field_ids}</p>}
-              {selected.sample_value_display && <p className="hint">サンプル: {selected.sample_company_year_id} / {selected.sample_value_display}</p>}
-              <div className="toolbar">
-                <button type="button" onClick={() => saveMapping()} disabled={savingId === selected.discovered_metric_id}>
-                  {savingId === selected.discovered_metric_id ? '保存中...' : '判断を保存'}
-                </button>
-                <button type="button" className="secondary" onClick={() => saveMapping('accepted')} disabled={savingId === selected.discovered_metric_id}>この対応で採用</button>
-                <button type="button" className="ghost" onClick={() => saveMapping('separate')} disabled={savingId === selected.discovered_metric_id}>別の項目として扱う</button>
-                <button type="button" className="ghost" onClick={() => saveMapping('rejected')} disabled={savingId === selected.discovered_metric_id}>使わない</button>
-                <button type="button" className="ghost" onClick={() => saveMapping('unmapped')} disabled={savingId === selected.discovered_metric_id}>未判断に戻す</button>
-              </div>
-            </>
-          ) : (
-            <Empty message="判断する有報項目を選択してください。" />
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -2859,13 +2240,7 @@ function ReviewPanel({
   const [deleting, setDeleting] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
   const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
-  const [automationError, setAutomationError] = React.useState('');
-  const [ruleCandidates, setRuleCandidates] = React.useState<Page | null>(null);
-  const [ruleCandidateStatus, setRuleCandidateStatus] = React.useState('active');
-  const [ruleMessage, setRuleMessage] = React.useState('');
-  const [ruleError, setRuleError] = React.useState('');
-  const [ruleLoading, setRuleLoading] = React.useState(false);
-  const editorRef = React.useRef<HTMLElement | null>(null);
+  const [automationError, setAutomationError] = React.useState('');  const editorRef = React.useRef<HTMLElement | null>(null);
   const autoSelectedTargetRef = React.useRef('');
   const { options, fieldLabels } = useOptions();
   const jobRunning = job?.status === 'running';
@@ -2921,17 +2296,6 @@ function ReviewPanel({
   React.useEffect(() => {
     loadAutomationStatus();
   }, [loadAutomationStatus]);
-
-  const loadRuleCandidates = React.useCallback((statusOverride?: string) => {
-    const status = statusOverride ?? ruleCandidateStatus;
-    api<Page>(`/api/reviews/rule-candidates?page=1&page_size=100&candidate_status=${status}`)
-      .then(setRuleCandidates)
-      .catch((err) => setRuleError(String(err)));
-  }, [ruleCandidateStatus]);
-
-  React.useEffect(() => {
-    loadRuleCandidates();
-  }, [loadRuleCandidates, refreshToken]);
 
   const selectedRowKey = selected ? reviewRowKey(selected) : '';
 
@@ -3002,19 +2366,7 @@ function ReviewPanel({
         method: 'POST',
         body: JSON.stringify({ reviews: [payload] })
       });
-      try {
-        const candidateResult = await api<RuleCandidateGenerateResult>('/api/reviews/rule-candidates/generate', { method: 'POST' });
-        const nextStatus = nextRuleCandidateStatusAfterGenerate(candidateResult, ruleCandidateStatus);
-        setRuleMessage(formatRuleCandidateGenerateMessage(candidateResult));
-        if (nextStatus !== ruleCandidateStatus) {
-          setRuleCandidateStatus(nextStatus);
-        }
-        loadRuleCandidates(nextStatus);
-        setMessage(`保存しました: ${result.changed}件 / resolved合計 ${result.total}件。正しい値から学習候補も更新しました。`);
-      } catch (candidateErr) {
-        setRuleError(String(candidateErr));
-        setMessage(`保存しました: ${result.changed}件 / resolved合計 ${result.total}件。学習候補の更新は失敗しました。`);
-      }
+      setMessage(`保存しました: ${result.changed}件 / resolved合計 ${result.total}件。`);
       loadReviewQueue();
       loadAutomationStatus();
     } catch (err) {
@@ -3123,29 +2475,6 @@ function ReviewPanel({
     }
   }
 
-  async function generateRuleCandidates() {
-    if (jobRunning) {
-      setRuleError('ジョブ実行中です。作業ログの完了を待ってから候補を生成してください。');
-      return;
-    }
-    setRuleLoading(true);
-    setRuleError('');
-    setRuleMessage('');
-    try {
-      const result = await api<RuleCandidateGenerateResult>('/api/reviews/rule-candidates/generate', { method: 'POST' });
-      const nextStatus = nextRuleCandidateStatusAfterGenerate(result, ruleCandidateStatus);
-      setRuleMessage(formatRuleCandidateGenerateMessage(result));
-      if (nextStatus !== ruleCandidateStatus) {
-        setRuleCandidateStatus(nextStatus);
-      }
-      loadRuleCandidates(nextStatus);
-    } catch (err) {
-      setRuleError(String(err));
-    } finally {
-      setRuleLoading(false);
-    }
-  }
-
   const extractedValue = String(selected?.extracted_value || '').trim();
   const isEditingSavedReview = selected?.review_saved === 'yes';
   const selectedCompanyId = selected ? companyIdFromCompanyYear(String(selected.company_year_id || '')) : '';
@@ -3211,18 +2540,6 @@ function ReviewPanel({
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="会社・項目・理由を検索" />
           </label>
         </div>
-        <RuleCandidatesPanel
-          data={ruleCandidates}
-          loading={ruleLoading}
-          message={ruleMessage}
-          error={ruleError}
-          candidateStatus={ruleCandidateStatus}
-          onCandidateStatus={setRuleCandidateStatus}
-          onGenerate={generateRuleCandidates}
-          onReload={loadRuleCandidates}
-          onJob={onJob}
-          jobRunning={jobRunning}
-        />
         <ReviewCategorySummary
           data={data}
           currentCategory={reviewCategory}
@@ -3310,7 +2627,7 @@ function ReviewPanel({
             <input value={correctedValue} onChange={(e) => setCorrectedValue(e.target.value)} disabled={decision !== 'correct'} />
             <label>メモ（任意）</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={5} />
-            <p className="hint">保存すると正しい値として記録され、学習候補も自動更新されます。根拠やラベルが分かる場合だけメモに補足してください。</p>
+            <p className="hint">保存すると正しい値として記録されます。根拠やラベルが分かる場合だけメモに補足してください。</p>
             {decision === 'correct' && !correctedValue.trim() && <p className="hint">修正値を入力すると保存できます。</p>}
             {decision === 'accept' && !extractedValue && <p className="hint">抽出値が空の行は correct で修正値を入力してください。</p>}
             {decision === 'not_applicable' && <p className="hint">対象外は値を作らず、レビュー済みとして扱います。持株会社など項目自体が存在しない場合に使ってください。</p>}
@@ -3365,8 +2682,8 @@ function ReviewWorkflowGuide({
     },
     {
       title: '2. 候補を反映して再取得',
-      body: '保存済みレビューから作られた候補を抽出設定へ反映し、そのまま他社・他年度を再取得します。',
-      meta: '一括実行'
+      body: '現在の抽出設定で再取得し、保存済みレビューを再適用します。',
+      meta: '再取得'
     },
     {
       title: '3. 最終データへ一括反映',
@@ -3380,7 +2697,7 @@ function ReviewWorkflowGuide({
       <div className="panel-head">
         <div>
           <h2>レビュー作業の流れ</h2>
-          <p className="muted">通常は 1 から 3 の順に進めます。「候補更新」は保存時に自動で走るため、手動更新は表示が古い時だけ使います。</p>
+          <p className="muted">通常は 1 から 3 の順に進めます。セル値修正は保存済みレビューとして残り、最終反映で完成表へ反映されます。</p>
         </div>
       </div>
       <div className="review-workflow-steps">
@@ -3430,245 +2747,6 @@ function ReviewCategorySummary({
           </button>
         ))}
       </div>
-    </div>
-  );
-}
-
-function RuleCandidatesPanel({
-  data,
-  loading,
-  message,
-  error,
-  candidateStatus,
-  onCandidateStatus,
-  onGenerate,
-  onReload,
-  onJob,
-  jobRunning
-}: {
-  data: Page | null;
-  loading: boolean;
-  message: string;
-  error: string;
-  candidateStatus: string;
-  onCandidateStatus: (status: string) => void;
-  onGenerate: () => void;
-  onReload: () => void;
-  onJob: (job: Job) => void;
-  jobRunning: boolean;
-}) {
-  const [selectedCandidate, setSelectedCandidate] = React.useState<Row | null>(null);
-  const [selectedCandidateFieldIds, setSelectedCandidateFieldIds] = React.useState<Set<string>>(() => new Set());
-  const [applyMessage, setApplyMessage] = React.useState('');
-  const [applyError, setApplyError] = React.useState('');
-  const [applying, setApplying] = React.useState(false);
-  const statusCounts = data?.status_counts;
-  const activeCandidateRows = React.useMemo(
-    () => (data?.rows || []).filter((row) => String(row.candidate_status || '').trim() !== 'applied' && String(row.field_id || '').trim()),
-    [data]
-  );
-  const activeFieldIds = React.useMemo(
-    () => Array.from(new Set(activeCandidateRows.map((row) => String(row.field_id || '').trim()).filter(Boolean))),
-    [activeCandidateRows]
-  );
-  const selectedActiveFieldIds = React.useMemo(
-    () => Array.from(selectedCandidateFieldIds).filter((fieldId) => activeFieldIds.includes(fieldId)),
-    [selectedCandidateFieldIds, activeFieldIds]
-  );
-
-  React.useEffect(() => {
-    setSelectedCandidateFieldIds((current) => {
-      const next = new Set(Array.from(current).filter((fieldId) => activeFieldIds.includes(fieldId)));
-      return next.size === current.size ? current : next;
-    });
-  }, [activeFieldIds]);
-
-  async function applySelectedCandidatesAndReextract() {
-    if (jobRunning) {
-      setApplyError('ジョブ実行中です。作業ログの完了を待ってから候補を反映してください。');
-      return;
-    }
-    if (!selectedActiveFieldIds.length) {
-      setApplyError('未対応候補を選択してください。');
-      return;
-    }
-    setApplying(true);
-    setApplyError('');
-    setApplyMessage('');
-    try {
-      const result = await api<RuleCandidateApplyResult>('/api/reviews/rule-candidates/apply', {
-        method: 'POST',
-        body: JSON.stringify({ field_ids: selectedActiveFieldIds })
-      });
-      const fieldUpdates = result.updated_fields
-        .map((item) => `${item.field_id}: ${item.columns.join(', ')}`)
-        .join(' / ') || '辞書変更なし';
-      const sectionUpdates = result.updated_sections.join(', ') || 'セクション変更なし';
-      const warningText = result.warnings.length ? ` / 注意: ${result.warnings.join(' / ')}` : '';
-      const next = await api<Job>('/api/jobs/reextract-with-review', { method: 'POST' });
-      onJob(next);
-      setApplyMessage(`設定へ一括反映し、再取得ジョブを開始しました: 候補${result.applied_candidates}件 / ${fieldUpdates} / ${sectionUpdates}${warningText}。反映済み候補は対応済みタブに移動します。`);
-      setSelectedCandidate(null);
-      setSelectedCandidateFieldIds(new Set());
-      onReload();
-    } catch (err) {
-      setApplyError(String(err));
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  async function startReextractWithReview() {
-    if (jobRunning) {
-      setApplyError('ジョブ実行中です。作業ログの完了を待ってから再取得してください。');
-      return;
-    }
-    setApplying(true);
-    setApplyError('');
-    setApplyMessage('');
-    try {
-      const next = await api<Job>('/api/jobs/reextract-with-review', { method: 'POST' });
-      onJob(next);
-      setApplyMessage('再取得だけを開始しました。直前に反映済みの設定で他社・他年度を再探索します。');
-    } catch (err) {
-      setApplyError(String(err));
-    } finally {
-      setApplying(false);
-    }
-  }
-
-  function pickCandidate(row: Row) {
-    setSelectedCandidate(row);
-    setApplyMessage('');
-    setApplyError('');
-    const fieldId = String(row.field_id || '').trim();
-    const isApplied = String(row.candidate_status || '').trim() === 'applied';
-    if (!fieldId || isApplied) return;
-    setSelectedCandidateFieldIds((current) => {
-      const next = new Set(current);
-      if (next.has(fieldId)) {
-        next.delete(fieldId);
-      } else {
-        next.add(fieldId);
-      }
-      return next;
-    });
-  }
-
-  function selectAllActiveCandidates() {
-    setSelectedCandidateFieldIds(new Set(activeFieldIds));
-    setApplyMessage('');
-    setApplyError('');
-  }
-
-  function clearCandidateSelection() {
-    setSelectedCandidateFieldIds(new Set());
-    setApplyMessage('');
-    setApplyError('');
-  }
-
-  function statusTabLabel(value: 'active' | 'applied' | 'all', label: string) {
-    const count = statusCounts?.[value];
-    return typeof count === 'number' ? `${label} ${count}` : label;
-  }
-
-  function emptyMessage() {
-    if (candidateStatus === 'active') return '未対応の抽出ルール候補はありません。新しい正しい値を保存すると候補は自動更新されます。必要なら手動で再生成してください。';
-    if (candidateStatus === 'applied') return '対応済みの抽出ルール候補はありません。';
-    return '抽出ルール候補はまだありません。';
-  }
-
-  return (
-    <div className="panel rule-candidates">
-      <div className="panel-head">
-        <h2>2. 学習ルール候補と再取得</h2>
-        <div className="toolbar">
-          <div className="segmented-control">
-            {[
-              { value: 'active', label: '未対応' },
-              { value: 'applied', label: '対応済み' },
-              { value: 'all', label: '全候補' }
-            ].map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className={candidateStatus === item.value ? 'active' : ''}
-                onClick={() => onCandidateStatus(item.value)}
-              >
-                {statusTabLabel(item.value as 'active' | 'applied' | 'all', item.label)}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={onGenerate} disabled={loading || jobRunning}>{loading ? '再生成中...' : '候補を手動再生成'}</button>
-          <button type="button" className="ghost" onClick={() => onReload()}>候補再読込</button>
-        </div>
-      </div>
-      <div className="rule-learning-flow">
-        <div>
-          <strong>1. 保存済みレビュー</strong>
-          <span>人間が確認した正しい値・対象外判断</span>
-        </div>
-        <div>
-          <strong>2. ルール候補</strong>
-          <span>同じ項目を探すXBRLタグ・表ラベル・見出し条件</span>
-        </div>
-        <div>
-          <strong>3. 反映して再取得</strong>
-          <span>選択候補を設定へ反映し、そのまま他社・他年度を再探索</span>
-        </div>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-      {error && <InlineError message={error} />}
-      <div className="candidate-action">
-        <div>
-          <strong>{selectedActiveFieldIds.length ? `${selectedActiveFieldIds.length}件を選択中` : selectedCandidate ? String(selectedCandidate.field_name_ja || selectedCandidate.field_id) : '候補を選択'}</strong>
-          <p className="muted">
-            {selectedCandidate
-              ? `field_id: ${String(selectedCandidate.field_id)} / 証跡数: ${String(selectedCandidate.evidence_count || '-')} / 状態: ${candidateStatusLabel(selectedCandidate.candidate_status)}`
-              : '未対応候補をまとめて選び、内容が妥当なら抽出設定へ反映して、そのまま再取得します。候補の手動再生成は通常不要です。'}
-          </p>
-        </div>
-        <button type="button" className="ghost" onClick={selectAllActiveCandidates} disabled={!activeFieldIds.length || applying || jobRunning}>
-          未対応を全選択
-        </button>
-        <button type="button" className="ghost" onClick={clearCandidateSelection} disabled={!selectedActiveFieldIds.length || applying || jobRunning}>
-          選択解除
-        </button>
-        <button type="button" className="secondary" onClick={applySelectedCandidatesAndReextract} disabled={!selectedActiveFieldIds.length || applying || jobRunning}>
-          {applying ? '実行中...' : '2. 選択候補を反映して再取得'}
-        </button>
-        <button type="button" className="ghost" onClick={startReextractWithReview} disabled={applying || jobRunning}>
-          再取得だけ
-        </button>
-      </div>
-      {selectedCandidate && (
-        <dl className="candidate-detail">
-          <dt>XBRLタグ候補</dt>
-          <dd>{renderClampedText(selectedCandidate.proposed_xbrl_tags || '-')}</dd>
-          <dt>セクション候補</dt>
-          <dd>{renderClampedText(selectedCandidate.proposed_section_keywords || '-')}</dd>
-          <dt>表・行ラベル候補</dt>
-          <dd>{renderClampedText([selectedCandidate.proposed_tables, selectedCandidate.proposed_row_labels].filter(Boolean).map(String).join(' / ') || '-')}</dd>
-          <dt>信頼度</dt>
-          <dd>{renderClampedText(`${String(selectedCandidate.confidence || '-')} / ${String(selectedCandidate.inference_notes || '-')}`)}</dd>
-        </dl>
-      )}
-      {applyMessage && <p className="success-text">{applyMessage}</p>}
-      {applyError && <InlineError message={applyError} />}
-      {data?.rows.length ? (
-        <DataTable
-          data={data.rows}
-          columns={onlyExistingColumns(data.columns, ruleCandidateListColumns)}
-          columnLabels={ruleCandidateLabels}
-          onRowClick={pickCandidate}
-          selectedRowKeys={selectedCandidateFieldIds}
-          getRowKey={(row) => String(row.field_id || '')}
-          compact
-          clampAllCells
-        />
-      ) : (
-        <Empty message={emptyMessage()} />
-      )}
     </div>
   );
 }
@@ -3723,8 +2801,6 @@ function AiPanel({ onError }: { onError: (message: string) => void }) {
   }
 
   const riskCount = auditResult?.summary?.risk_flags ?? '-';
-  const reviewSectionCount = auditResult?.summary?.review_derived_sections ?? '-';
-  const candidateCount = auditResult?.summary?.review_learning_candidates ?? '-';
 
   return (
     <section className="ai-layout">
@@ -3772,7 +2848,7 @@ function AiPanel({ onError }: { onError: (message: string) => void }) {
               <dt>生成日時</dt>
               <dd>{auditResult.generated_at_utc}</dd>
               <dt>赤旗</dt>
-              <dd>{String(riskCount)}件 / review_* {String(reviewSectionCount)}件 / 候補 {String(candidateCount)}件</dd>
+              <dd>{String(riskCount)}件</dd>
               <dt>主なファイル</dt>
               <dd>{auditResult.files.slice(0, 6).map((item) => item.file).join(', ')}</dd>
             </dl>
@@ -4903,13 +3979,11 @@ function ReportPanel({ status, refreshToken, job, onJob, onError }: {
 }) {
   const [report, setReport] = React.useState('');
   const [coverage, setCoverage] = React.useState('');
-  const [learningImpact, setLearningImpact] = React.useState('');
   const jobRunning = job?.status === 'running';
 
   React.useEffect(() => {
     api<{ content: string }>('/api/markdown/run_report').then((data) => setReport(data.content));
     api<{ content: string }>('/api/markdown/field_coverage').then((data) => setCoverage(data.content));
-    api<{ content: string }>('/api/markdown/review_learning_impact').then((data) => setLearningImpact(data.content));
   }, [refreshToken]);
 
   const chartData = Object.entries(status?.run_report.summary || {})
@@ -4936,7 +4010,6 @@ function ReportPanel({ status, refreshToken, job, onJob, onError }: {
       </div>
       <CorroborationSummaryPanel job={job} onJob={onJob} onError={onError} jobRunning={jobRunning} refreshToken={refreshToken} />
       <MarkdownBlock title="Run Report" content={report} />
-      <MarkdownBlock title="Review Learning Impact" content={learningImpact || 'まだレビュー学習後の再取得が実行されていません。'} />
       <MarkdownBlock title="Field Coverage" content={coverage} />
     </section>
   );

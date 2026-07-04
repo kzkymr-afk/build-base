@@ -13,8 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuho_auto_extract import __version__
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, rule_candidates
-from yuho_auto_extract.services import xbrl_discovered_metrics
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews
 from yuho_auto_extract.web_api.jobs import JobAlreadyRunning, JobManager
 
 
@@ -56,10 +55,6 @@ class NotApplicableRequest(BaseModel):
     end_year: Optional[int] = None
 
 
-class RuleCandidateApplyRequest(BaseModel):
-    field_ids: List[str] = []
-
-
 class FieldDefinitionUpdateRequest(BaseModel):
     updates: Dict[str, Any]
 
@@ -68,19 +63,6 @@ class FieldTermsAppendRequest(BaseModel):
     synonyms: List[str] = []
     xbrl_tags: List[str] = []
     section_keywords: List[str] = []
-    note: str = ""
-
-
-class XbrlMetricMappingRequest(BaseModel):
-    target_field_id: str = ""
-    mapping_status: str = "candidate"
-    note: str = ""
-
-
-class XbrlMetricBulkMappingRequest(BaseModel):
-    discovered_metric_ids: List[str] = []
-    target_field_id: str = ""
-    mapping_status: str = "rejected"
     note: str = ""
 
 
@@ -252,21 +234,6 @@ def start_xbrl_fact_store() -> Dict[str, Any]:
     return _start_job("xbrl-fact-store", pipeline.build_xbrl_fact_store)
 
 
-@app.post("/api/jobs/major-financial-evidence")
-def start_major_financial_evidence() -> Dict[str, Any]:
-    return _start_job("major-financial-evidence", pipeline.build_major_financial_evidence)
-
-
-@app.post("/api/jobs/xbrl-discovered-metrics")
-def start_xbrl_discovered_metrics() -> Dict[str, Any]:
-    return _start_job("xbrl-discovered-metrics", pipeline.build_xbrl_discovered_metrics)
-
-
-@app.post("/api/jobs/major-financial-ai-compare")
-def start_major_financial_ai_compare() -> Dict[str, Any]:
-    return _start_job("major-financial-ai-compare", pipeline.compare_major_financial_ai_decisions)
-
-
 @app.post("/api/jobs/report")
 def start_report() -> Dict[str, Any]:
     return _start_job("report", pipeline.rebuild_report)
@@ -364,59 +331,6 @@ def append_field_terms(field_id: str, request: FieldTermsAppendRequest) -> Dict[
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/xbrl/discovered-metrics")
-def xbrl_discovered_metric_catalog(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=500),
-    search: str = "",
-    mapping_status: str = "",
-    target_field_id: str = "",
-) -> Dict[str, Any]:
-    try:
-        return xbrl_discovered_metrics.read_xbrl_discovered_metrics(
-            PROJECT_ROOT,
-            page=page,
-            page_size=page_size,
-            search=search,
-            mapping_status=mapping_status,
-            target_field_id=target_field_id,
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.post("/api/xbrl/discovered-metrics/{metric_id}/mapping")
-def upsert_xbrl_discovered_metric_mapping(metric_id: str, request: XbrlMetricMappingRequest) -> Dict[str, Any]:
-    try:
-        return xbrl_discovered_metrics.upsert_xbrl_metric_mapping(
-            PROJECT_ROOT,
-            metric_id,
-            target_field_id=request.target_field_id,
-            mapping_status=request.mapping_status,
-            note=request.note,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@app.post("/api/xbrl/discovered-metrics/mappings/bulk")
-def bulk_upsert_xbrl_discovered_metric_mappings(request: XbrlMetricBulkMappingRequest) -> Dict[str, Any]:
-    try:
-        return xbrl_discovered_metrics.bulk_upsert_xbrl_metric_mappings(
-            PROJECT_ROOT,
-            request.discovered_metric_ids,
-            target_field_id=request.target_field_id,
-            mapping_status=request.mapping_status,
-            note=request.note,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/charts/data")
@@ -520,30 +434,6 @@ def mark_not_applicable(request: NotApplicableRequest) -> Dict[str, Any]:
             start_year=request.start_year,
             end_year=request.end_year,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/reviews/rule-candidates")
-def review_rule_candidates(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(100, ge=1, le=500),
-    candidate_status: str = "active",
-) -> Dict[str, Any]:
-    result = datasets.paginate(rule_candidates.read_rule_candidates(PROJECT_ROOT, candidate_status=candidate_status), page, page_size)
-    result["status_counts"] = rule_candidates.rule_candidate_status_counts(PROJECT_ROOT)
-    return result
-
-
-@app.post("/api/reviews/rule-candidates/generate")
-def generate_review_rule_candidates() -> Dict[str, Any]:
-    return rule_candidates.generate_rule_candidates(PROJECT_ROOT)
-
-
-@app.post("/api/reviews/rule-candidates/apply")
-def apply_review_rule_candidates(request: RuleCandidateApplyRequest) -> Dict[str, Any]:
-    try:
-        return rule_candidates.apply_rule_candidates(PROJECT_ROOT, request.field_ids)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

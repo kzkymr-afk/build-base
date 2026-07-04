@@ -270,7 +270,7 @@ def write_mapping_card_chunks(
 ) -> List[Dict[str, Any]]:
     """カードをチャンクに分割してプロンプトファイルを書き出す。
 
-    major_financial_evidence.py の _write_prompt_chunks パターンを踏襲。
+    AI投入用カードを分割して、後続の人間/AIレビューに渡せる形で保存する。
     戻り値は各チャンクの {input_ref, path, observed_item_ids, prompt} のリスト。
     """
     out_dir = root / AI_EVIDENCE_DIR

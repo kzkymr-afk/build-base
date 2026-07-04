@@ -19,13 +19,11 @@ COPY_FILES = [
     ("config/validation_rules.yml", "config/validation_rules.yml", "検算・整合性ルール。抽出値の採否条件を監査する。"),
     ("data/final/run_report.md", "reports/run_report.md", "直近実行の全体サマリー。"),
     ("data/final/field_coverage.csv", "reports/field_coverage.csv", "項目別カバレッジ。低カバレッジ項目の監査に使う。"),
-    ("data/review/rule_candidates.csv", "review/rule_candidates.csv", "レビューから作られた抽出ルール候補。"),
     ("data/review/review_resolved.csv", "review/review_resolved.csv", "保存済みレビュー判断。"),
     ("src/yuho_auto_extract/section_locator.py", "code/section_locator.py", "候補ブロック探索ロジック。"),
     ("src/yuho_auto_extract/local_table_extractor.py", "code/local_table_extractor.py", "ローカル表抽出ロジック。レビュー由来ルールの受け皿。"),
     ("src/yuho_auto_extract/edinet_db.py", "code/edinet_db.py", "XBRL DB抽出とローカル抽出の統合箇所。"),
     ("src/yuho_auto_extract/normalizer.py", "code/normalizer.py", "数値・単位・スコープ正規化。"),
-    ("src/yuho_auto_extract/services/rule_candidates.py", "code/rule_candidates.py", "レビュー文から候補ルールを作る処理。"),
 ]
 
 GENERATED_FILES = [
@@ -35,7 +33,6 @@ GENERATED_FILES = [
     ("manifest.json", "生成日時と同梱ファイル一覧。"),
     ("field_algorithm_inventory.csv", "項目別の抽出方式・カバレッジ・レビュー由来状況。"),
     ("section_inventory.csv", "抽出セクション別のキーワードと対象項目。"),
-    ("review_learning_inventory.csv", "レビュー由来ルール候補の一覧。"),
     ("risk_flags.csv", "複雑化・過剰適合・未反映の自動検出フラグ。"),
     ("local_rule_samples.csv", "LOCAL_RULE_TABLE由来の根拠サンプル。"),
 ]
@@ -52,18 +49,15 @@ def build_algorithm_audit_bundle(root: Path) -> Dict[str, Any]:
     source_audit_rows = _read_rows(root / "data" / "final" / "source_audit.csv")
     coverage_rows = _read_rows(root / "data" / "final" / "field_coverage.csv")
     resolved_rows = _read_rows(root / "data" / "review" / "review_resolved.csv")
-    candidate_rows = _read_rows(root / "data" / "review" / "rule_candidates.csv")
 
-    field_inventory = _field_inventory(field_rows, final_long_rows, coverage_rows, resolved_rows, candidate_rows)
+    field_inventory = _field_inventory(field_rows, final_long_rows, coverage_rows, resolved_rows)
     section_inventory = _section_inventory(sections)
-    review_inventory = _review_learning_inventory(candidate_rows, sections)
-    risk_flags = _risk_flags(field_inventory, section_inventory, review_inventory, resolved_rows)
+    risk_flags = _risk_flags(field_inventory, section_inventory, resolved_rows)
     local_samples = _local_rule_samples(source_audit_rows)
 
     generated = [
         _write_table(audit_dir / "field_algorithm_inventory.csv", field_inventory, "項目別の抽出方式・カバレッジ・レビュー由来状況。"),
         _write_table(audit_dir / "section_inventory.csv", section_inventory, "抽出セクション別のキーワードと対象項目。"),
-        _write_table(audit_dir / "review_learning_inventory.csv", review_inventory, "レビュー由来ルール候補の一覧。"),
         _write_table(audit_dir / "risk_flags.csv", risk_flags, "複雑化・過剰適合・未反映の自動検出フラグ。"),
         _write_table(audit_dir / "local_rule_samples.csv", local_samples, "LOCAL_RULE_TABLE由来の根拠サンプル。"),
     ]
@@ -94,8 +88,6 @@ def build_algorithm_audit_bundle(root: Path) -> Dict[str, Any]:
         "summary": {
             "fields": len(field_inventory),
             "sections": len(section_inventory),
-            "review_derived_sections": sum(1 for row in section_inventory if row.get("rule_type") == "review_derived"),
-            "review_learning_candidates": len(review_inventory),
             "risk_flags": len(risk_flags),
             "risk_counts": risk_counts,
             "local_rule_samples": len(local_samples),
@@ -137,7 +129,6 @@ def _field_inventory(
     final_long_rows: Sequence[Dict[str, Any]],
     coverage_rows: Sequence[Dict[str, Any]],
     resolved_rows: Sequence[Dict[str, Any]],
-    candidate_rows: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     extracted_by_field: Dict[str, Counter] = defaultdict(Counter)
     for row in final_long_rows:
@@ -155,7 +146,6 @@ def _field_inventory(
         review_counts[field_id]["saved"] += 1
         review_counts[field_id][f"applied_status:{str(row.get('applied_status', '') or 'blank')}"] += 1
 
-    candidates_by_field = {str(row.get("field_id", "")): row for row in candidate_rows if row.get("field_id")}
     out: List[Dict[str, Any]] = []
     for field in field_rows:
         field_id = str(field.get("field_id", "")).strip()
@@ -163,7 +153,6 @@ def _field_inventory(
             continue
         counts = extracted_by_field.get(field_id, Counter())
         coverage = coverage_by_field.get(field_id, {})
-        candidate = candidates_by_field.get(field_id, {})
         out.append(
             {
                 "field_id": field_id,
@@ -184,9 +173,6 @@ def _field_inventory(
                 "manual_rows": counts.get("MANUAL", 0),
                 "saved_review_count": review_counts[field_id].get("saved", 0),
                 "applied_review_count": review_counts[field_id].get("applied_status:applied", 0),
-                "rule_candidate_evidence_count": candidate.get("evidence_count", ""),
-                "rule_candidate_needs_manual_check": candidate.get("needs_manual_check", ""),
-                "rule_candidate_action": candidate.get("recommended_action", ""),
             }
         )
     return out
@@ -203,7 +189,7 @@ def _section_inventory(sections: Dict[str, Any]) -> List[Dict[str, Any]]:
         out.append(
             {
                 "section_name": section_name,
-                "rule_type": "review_derived" if section_name.startswith("review_") else "core",
+                "rule_type": "core",
                 "description": section.get("description", ""),
                 "target_fields": ";".join(target_fields),
                 "target_field_count": len(target_fields),
@@ -216,85 +202,15 @@ def _section_inventory(sections: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-def _review_learning_inventory(candidate_rows: Sequence[Dict[str, Any]], sections: Dict[str, Any]) -> List[Dict[str, Any]]:
-    section_names = set(sections.keys())
-    out: List[Dict[str, Any]] = []
-    for row in candidate_rows:
-        field_id = str(row.get("field_id", "")).strip()
-        if not field_id:
-            continue
-        section_name = f"review_{field_id}"
-        out.append(
-            {
-                "field_id": field_id,
-                "field_name_ja": row.get("field_name_ja", ""),
-                "evidence_count": row.get("evidence_count", ""),
-                "company_year_ids": row.get("company_year_ids", ""),
-                "generality": row.get("generality", ""),
-                "needs_manual_check": row.get("needs_manual_check", ""),
-                "recommended_action": row.get("recommended_action", ""),
-                "has_config_section": "yes" if section_name in section_names else "no",
-                "proposed_xbrl_tags": row.get("proposed_xbrl_tags", ""),
-                "proposed_section_keywords": row.get("proposed_section_keywords", ""),
-                "proposed_tables": row.get("proposed_tables", ""),
-                "proposed_row_labels": row.get("proposed_row_labels", ""),
-                "reviewed_value_examples": row.get("reviewed_value_examples", ""),
-            }
-        )
-    return out
-
-
 def _risk_flags(
     field_inventory: Sequence[Dict[str, Any]],
     section_inventory: Sequence[Dict[str, Any]],
-    review_inventory: Sequence[Dict[str, Any]],
     resolved_rows: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     flags: List[Dict[str, Any]] = []
-    field_by_id = {str(row.get("field_id", "")): row for row in field_inventory}
-
-    for row in review_inventory:
-        evidence_count = _as_int(row.get("evidence_count"))
-        field_id = str(row.get("field_id", ""))
-        if evidence_count < 2 and "全社共通" in str(row.get("generality", "")):
-            flags.append(
-                _flag(
-                    "medium",
-                    "review_learning",
-                    field_id,
-                    "single_evidence_global_rule",
-                    f"証跡{evidence_count}件で全社共通候補になっています。",
-                    "別会社・別年度の証跡を追加するか、汎用ルールではなく保留候補にしてください。",
-                )
-            )
-        if str(row.get("needs_manual_check", "")).lower() == "yes":
-            flags.append(
-                _flag(
-                    "medium",
-                    "review_learning",
-                    field_id,
-                    "candidate_needs_manual_check",
-                    "rule_candidates.csv が要確認フラグを出しています。",
-                    "設定反映前に source_quote と対象スコープを確認してください。",
-                )
-            )
 
     for section in section_inventory:
         section_name = str(section.get("section_name", ""))
-        if section.get("rule_type") == "review_derived":
-            field_ids = _split_values(section.get("target_fields", ""))
-            evidence = max((_as_int(field_by_id.get(field_id, {}).get("rule_candidate_evidence_count")) for field_id in field_ids), default=0)
-            if evidence < 2:
-                flags.append(
-                    _flag(
-                        "medium",
-                        "section_config",
-                        section_name,
-                        "review_section_low_evidence",
-                        f"review_* セクションですが、紐づく証跡が{evidence}件です。",
-                        "同じ表構造で複数社・複数年度に効くことを確認してから汎用化してください。",
-                    )
-                )
         if _as_int(section.get("target_field_count")) >= 8:
             flags.append(
                 _flag(
@@ -389,7 +305,7 @@ def _local_rule_samples(source_audit_rows: Sequence[Dict[str, Any]], limit: int 
 def _audit_prompt() -> str:
     return """# 有報抽出アルゴリズム定期メンテナンス
 
-あなたはBuildBaseの保守者です。目的は、レビュー由来のルール追加が局所最適・過剰適合・非効率な分岐の山になっていないかを点検し、保守可能なアルゴリズムへ整理し、必要なコード・設定・テストを実装することです。
+あなたはBuildBaseの保守者です。目的は、抽出設定とローカル表抽出ロジックが局所最適・過剰適合・非効率な分岐の山になっていないかを点検し、保守可能なアルゴリズムへ整理し、必要なコード・設定・テストを実装することです。
 
 ユーザーはコード知識を前提にしません。コード妥当性の確認をユーザーに求めず、Codex/AIが監査、実装、テスト、差分説明まで担当してください。ユーザーに確認を求めるのは、業務上の採用判断、破壊的なデータ削除、外部API・課金・公開範囲に影響する変更だけです。
 
@@ -399,7 +315,6 @@ def _audit_prompt() -> str:
 
 - `field_algorithm_inventory.csv`
 - `section_inventory.csv`
-- `review_learning_inventory.csv`
 - `risk_flags.csv`
 - `local_rule_samples.csv`
 - `config/field_definition.csv`
@@ -407,7 +322,6 @@ def _audit_prompt() -> str:
 - `config/validation_rules.yml`
 - `code/local_table_extractor.py`
 - `code/section_locator.py`
-- `code/rule_candidates.py`
 - `reports/field_coverage.csv`
 - `reports/run_report.md`
 
@@ -423,13 +337,12 @@ def _audit_prompt() -> str:
 
 ## メンテナンス手順
 
-1. `review_*` セクションが増えすぎていないか。統合できる汎用パーサはあるか。
-2. `rule_candidates.csv` の証跡数が少ないのに全社共通化されているものはないか。
-3. `field_definition.csv` の XBRL候補・同義語・セクションキーワードが広がりすぎて誤抽出リスクを上げていないか。
-4. `LOCAL_RULE_TABLE` が増えている項目について、XBRL補完なのか、正式に表パーサへ昇格すべきなのか。
-5. 低カバレッジ項目は、対象外・レビュー継続・汎用ルール追加のどれが妥当か。
-6. 通常リスクの改善は、提案だけで止めずにコード・設定・テストへ反映する。
-7. 高リスクまたは業務判断が必要な変更だけ、理由と選択肢を短く報告して停止する。
+1. 抽出セクションが増えすぎていないか。統合できる汎用パーサはあるか。
+2. `field_definition.csv` の XBRL候補・同義語・セクションキーワードが広がりすぎて誤抽出リスクを上げていないか。
+3. `LOCAL_RULE_TABLE` が増えている項目について、XBRL補完なのか、正式に表パーサへ昇格すべきなのか。
+4. 低カバレッジ項目は、対象外・レビュー継続・汎用ルール追加のどれが妥当か。
+5. 通常リスクの改善は、提案だけで止めずにコード・設定・テストへ反映する。
+6. 高リスクまたは業務判断が必要な変更だけ、理由と選択肢を短く報告して停止する。
 
 ## 出力形式
 

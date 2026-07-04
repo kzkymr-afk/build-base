@@ -876,7 +876,7 @@ def _prune_semantics_backups(root: Path, keep: int = SEMANTICS_DB_BACKUP_KEEP) -
 def backup_semantics_db(root: Path) -> Optional[Path]:
     """semantics.db が既に存在する場合、タイムスタンプ付きでバイナリコピーしてからNoneではなくPathを返す。
 
-    既存の _backup_file パターン（services/field_admin.py, services/rule_candidates.py）を踏襲。
+    既存の _backup_file パターン（services/field_admin.py）を踏襲。
     存在しない場合は None を返す（初回実行時等）。
 
     コピー後に _prune_semantics_backups() で古い世代を刈り取る（最新 SEMANTICS_DB_BACKUP_KEEP

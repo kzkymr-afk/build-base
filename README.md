@@ -164,9 +164,7 @@ npm run dev
 - `final_master_wide.csv` の閲覧
 - `source_audit.csv` による根拠確認
 - `review_queue.csv` の確認と `data/review/review_resolved.csv` へのレビュー保存
-- レビューの `reviewer_note` から `data/review/rule_candidates.csv` への抽出ルール候補生成
-- 選択した抽出ルール候補を `field_definition.csv` / `field_definition.xlsx` / `extraction_sections.yml` へ反映
-- レビュー由来ルールでの再取得と保存済みレビュー値の最終反映を一つのジョブで実行
+- 現在の抽出設定での再取得と、保存済みレビュー値の最終反映をジョブで実行
 - AI分析用Markdownプロンプト生成
 - 抽出アルゴリズム監査用の `data/algorithm_audit/` パック生成
 - `項目整理` タブで `field_definition.csv` の項目名、同義語、XBRL候補、セクション語をバックアップ付きで編集

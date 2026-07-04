@@ -285,7 +285,7 @@ def save_resolved_reviews(request: ReviewSaveRequest) -> Dict[str, Any]:
 import行に `mapping_review` を追加（16行目のimport文にモジュール追加）:
 
 ```python
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, market, mapping_review, pipeline, reviews, rule_candidates
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, market, mapping_review, pipeline, reviews
 ```
 
 Pydanticモデル追加（既存`ReviewSaveRequest`等と同じ並びに追加）:

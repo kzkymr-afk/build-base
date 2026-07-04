@@ -179,18 +179,6 @@ case "$1" in
     shift
     exec "$PYTHON_BIN" -m yuho_auto_extract build-xbrl-fact-store "$@"
     ;;
-  major-financial-evidence)
-    shift
-    exec "$PYTHON_BIN" -m yuho_auto_extract prepare-major-financial-evidence "$@"
-    ;;
-  xbrl-discovered-metrics)
-    shift
-    exec "$PYTHON_BIN" -m yuho_auto_extract prepare-xbrl-discovered-metrics "$@"
-    ;;
-  major-financial-ai-compare)
-    shift
-    exec "$PYTHON_BIN" -m yuho_auto_extract compare-major-financial-ai-decisions "$@"
-    ;;
   status)
     exec "$PYTHON_BIN" -m yuho_auto_extract automation-status
     ;;
@@ -307,9 +295,6 @@ case "$1" in
     echo "  ./yuho ai           AI投入用フォルダ生成"
     echo "  ./yuho audit        アルゴリズム監査パック生成"
     echo "  ./yuho xbrl-fact-store XBRL Fact Storeを生成"
-    echo "  ./yuho major-financial-evidence 主要財務Evidence Packを生成"
-    echo "  ./yuho xbrl-discovered-metrics 全XBRL数値項目候補を生成"
-    echo "  ./yuho major-financial-ai-compare AI判断比較レポートを生成"
     echo "  ./yuho status       年次自動化・レビュー完了判定を確認"
     echo "  ./yuho annual       年次取得ジョブを実行"
     echo "  ./yuho stock-status 月次株価取得の状態を確認"

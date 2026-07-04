@@ -22,9 +22,7 @@ from .review_queue import build_review_queue
 from .run_reporter import build_run_report, write_run_report
 from .section_locator import locate_candidate_blocks
 from .services.algorithm_audit import build_algorithm_audit_bundle
-from .services.major_financial_evidence import build_major_financial_evidence_pack, compare_major_financial_ai_decisions
 from .services.manual_technicians import import_manual_technicians
-from .services.xbrl_discovered_metrics import build_xbrl_discovered_metrics
 from .validator import attach_validation_status, validate_records
 from .xbrl_csv_parser import extract_xbrl_csv_long
 from .xbrl_fact_store import build_xbrl_fact_store, compare_xbrl_fact_store, extract_from_xbrl_fact_store
@@ -97,22 +95,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--new", default="data/intermediate/xbrl_fact_store_extracted_long.csv")
     p.add_argument("--output", default="data/reports/xbrl_fact_store_compare.csv")
     p.set_defaults(handler=cmd_compare_xbrl_fact_store)
-    p = sub.add_parser("build-major-financial-evidence")
-    p.add_argument("--chunk-size", default=80, type=int)
-    p.set_defaults(handler=cmd_build_major_financial_evidence)
-    p = sub.add_parser("prepare-major-financial-evidence")
-    p.add_argument("--chunk-size", default=80, type=int)
-    p.set_defaults(handler=cmd_prepare_major_financial_evidence)
-    p = sub.add_parser("build-xbrl-discovered-metrics")
-    p.add_argument("--include-prior-periods", action="store_true")
-    p.set_defaults(handler=cmd_build_xbrl_discovered_metrics)
-    p = sub.add_parser("prepare-xbrl-discovered-metrics")
-    p.add_argument("--include-prior-periods", action="store_true")
-    p.set_defaults(handler=cmd_prepare_xbrl_discovered_metrics)
-    p = sub.add_parser("compare-major-financial-ai-decisions")
-    p.add_argument("--decisions", default="data/ai_evidence/major_financial/ai_decisions.jsonl")
-    p.add_argument("--output", default="data/reports/major_financial_ai_decision_compare.csv")
-    p.set_defaults(handler=cmd_compare_major_financial_ai_decisions)
     sub.add_parser("locate-sections").set_defaults(handler=cmd_locate_sections)
 
     sub.add_parser("normalize").set_defaults(handler=cmd_normalize)
@@ -365,62 +347,6 @@ def cmd_compare_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
         _project_path(root, args.old),
         _project_path(root, args.new),
         _project_path(root, args.output),
-    )
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
-
-
-def cmd_build_major_financial_evidence(root: Path, args: argparse.Namespace) -> int:
-    result = build_major_financial_evidence_pack(root, chunk_size=args.chunk_size)
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
-
-
-def cmd_prepare_major_financial_evidence(root: Path, args: argparse.Namespace) -> int:
-    fact_store = build_xbrl_fact_store(root)
-    evidence = build_major_financial_evidence_pack(root, chunk_size=args.chunk_size)
-    print(
-        json.dumps(
-            {
-                "xbrl_fact_store": fact_store,
-                "major_financial_evidence": evidence,
-            },
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-    )
-    return 0
-
-
-def cmd_build_xbrl_discovered_metrics(root: Path, args: argparse.Namespace) -> int:
-    result = build_xbrl_discovered_metrics(root, current_year_only=not args.include_prior_periods)
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
-
-
-def cmd_prepare_xbrl_discovered_metrics(root: Path, args: argparse.Namespace) -> int:
-    fact_store = build_xbrl_fact_store(root)
-    discovered = build_xbrl_discovered_metrics(root, current_year_only=not args.include_prior_periods)
-    print(
-        json.dumps(
-            {
-                "xbrl_fact_store": fact_store,
-                "xbrl_discovered_metrics": discovered,
-            },
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-        )
-    )
-    return 0
-
-
-def cmd_compare_major_financial_ai_decisions(root: Path, args: argparse.Namespace) -> int:
-    result = compare_major_financial_ai_decisions(
-        root,
-        decisions_path=_project_path(root, args.decisions),
-        output_path=_project_path(root, args.output),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
