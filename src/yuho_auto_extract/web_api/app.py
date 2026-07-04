@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuho_auto_extract import __version__
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts
 from yuho_auto_extract.web_api.jobs import JobAlreadyRunning, JobManager
 
 
@@ -97,6 +97,20 @@ class PromptRequest(BaseModel):
 class MappingReviewDecisionRequest(BaseModel):
     reviewer: str = ""
     note: str = ""
+
+
+class ConceptUpdateRequest(BaseModel):
+    updates: Dict[str, Any]
+
+
+class ConceptMergeRequest(BaseModel):
+    source_concept_id: str
+    target_concept_id: str
+
+
+class ConceptSplitRequest(BaseModel):
+    source_concept_id: str
+    new_concepts: List[Dict[str, Any]]
 
 
 @app.get("/api/status")
@@ -480,6 +494,40 @@ def reject_mapping(mapping_id: str, request: MappingReviewDecisionRequest = Body
     if not result.get("updated"):
         raise HTTPException(status_code=409, detail=f"mapping {mapping_id} is not in 'proposed' status or not found")
     return result
+
+
+@app.get("/api/concepts")
+def concepts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    status: str = "",
+    search: str = "",
+) -> Dict[str, Any]:
+    return semantics_concepts.list_concepts(PROJECT_ROOT, page=page, page_size=page_size, status=status, search=search)
+
+
+@app.post("/api/concepts/merge")
+def merge_concept(request: ConceptMergeRequest) -> Dict[str, Any]:
+    try:
+        return semantics_concepts.merge_concepts(PROJECT_ROOT, request.source_concept_id, request.target_concept_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/concepts/split")
+def split_concept(request: ConceptSplitRequest) -> Dict[str, Any]:
+    try:
+        return semantics_concepts.split_concept(PROJECT_ROOT, request.source_concept_id, request.new_concepts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/concepts/{concept_id}")
+def update_concept(concept_id: str, request: ConceptUpdateRequest) -> Dict[str, Any]:
+    try:
+        return semantics_concepts.update_concept(PROJECT_ROOT, concept_id, request.updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/markdown/{name}")

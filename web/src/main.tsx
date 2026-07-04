@@ -46,6 +46,8 @@ import {
   type ChartSource,
   type ChartViewMode,
   type CompanyOption,
+  type ConceptListResult,
+  type ConceptRow,
   type CorroborationSummary,
   type DesignPreset,
   type ExportBackground,
@@ -521,6 +523,7 @@ function App() {
           />
         )}
         {tab === 'fields' && <FieldAdminPanel onUpdated={() => setDataRefreshToken((value) => value + 1)} />}
+        {tab === 'concepts' && <ConceptManagementPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'stocks' && <StocksPanel refreshToken={dataRefreshToken} />}
         {tab === 'factbooks' && <FactbooksPanel refreshToken={dataRefreshToken} job={job} onJob={setJob} onError={setError} />}
         {tab === 'charts' && <ChartsPanel refreshToken={dataRefreshToken} />}
@@ -1193,6 +1196,199 @@ function ResultsPanel({
       ) : (
         <Empty message="結果データを読み込み中です。" />
       )}
+    </section>
+  );
+}
+
+function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: string) => void; refreshToken: number }) {
+  const [data, setData] = React.useState<ConceptListResult | null>(null);
+  const [status, setStatus] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [page, setPage] = React.useState(1);
+  const [selectedId, setSelectedId] = React.useState('');
+  const [draft, setDraft] = React.useState<Partial<ConceptRow>>({});
+  const [targetId, setTargetId] = React.useState('');
+  const [splitDraft, setSplitDraft] = React.useState({ concept_id: '', concept_name_ja: '', category: '', data_scope: '', target_unit: '', period_type: '', definition_ja: '' });
+  const [message, setMessage] = React.useState('');
+
+  const load = React.useCallback(() => {
+    const params = new URLSearchParams({ page: String(page), page_size: '100', status, search });
+    api<ConceptListResult>(`/api/concepts?${params.toString()}`)
+      .then((result) => {
+        setData(result);
+        if (!selectedId && result.rows.length) {
+          setSelectedId(result.rows[0].concept_id);
+          setDraft(result.rows[0]);
+        }
+      })
+      .catch((err) => onError(String(err)));
+  }, [onError, page, search, selectedId, status]);
+
+  React.useEffect(() => {
+    load();
+  }, [load, refreshToken]);
+
+  const selected = data?.rows.find((row) => row.concept_id === selectedId) || null;
+
+  function selectConcept(row: ConceptRow) {
+    setSelectedId(row.concept_id);
+    setDraft(row);
+    setTargetId(row.merged_into_concept_id || '');
+    setMessage('');
+  }
+
+  async function saveConcept() {
+    if (!selectedId) return;
+    try {
+      await api(`/api/concepts/${encodeURIComponent(selectedId)}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          updates: {
+            concept_name_ja: draft.concept_name_ja,
+            category: draft.category,
+            data_scope: draft.data_scope,
+            target_unit: draft.target_unit,
+            period_type: draft.period_type,
+            definition_ja: draft.definition_ja,
+            calculation_formula: draft.calculation_formula,
+            status: draft.status,
+            merged_into_concept_id: draft.merged_into_concept_id,
+          },
+        }),
+      });
+      setMessage('保存しました');
+      load();
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  async function mergeConcept() {
+    if (!selectedId || !targetId) return;
+    try {
+      const result = await api<{ mappings_retargeted: number }>('/api/concepts/merge', {
+        method: 'POST',
+        body: JSON.stringify({ source_concept_id: selectedId, target_concept_id: targetId }),
+      });
+      setMessage(`統合しました: mapping ${result.mappings_retargeted}件を移動`);
+      load();
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  async function splitConcept() {
+    if (!selectedId || !splitDraft.concept_name_ja) return;
+    try {
+      await api('/api/concepts/split', {
+        method: 'POST',
+        body: JSON.stringify({ source_concept_id: selectedId, new_concepts: [splitDraft] }),
+      });
+      setMessage('分割先概念を作成しました');
+      setSplitDraft({ concept_id: '', concept_name_ja: '', category: '', data_scope: '', target_unit: '', period_type: '', definition_ja: '' });
+      load();
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  return (
+    <section className="stack">
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>概念管理</h2>
+            <p className="muted">canonical_concepts を確認し、概念属性・統合・分割先を管理します。</p>
+          </div>
+          <span className="badge">total {data?.total ?? '-'}</span>
+        </div>
+        <div className="toolbar">
+          <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="概念ID・名称・カテゴリ検索" />
+          <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+            <option value="">全status</option>
+            <option value="active">active</option>
+            <option value="merged">merged</option>
+            <option value="retired">retired</option>
+          </select>
+          <button className="ghost" onClick={load}>再読込</button>
+        </div>
+        {message && <div className="notice">{message}</div>}
+        <div className="concept-layout">
+          <div className="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>concept_id</th>
+                  <th>名称</th>
+                  <th>status</th>
+                  <th>map</th>
+                  <th>単位</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.rows || []).map((row) => (
+                  <tr key={row.concept_id} className={row.concept_id === selectedId ? 'selected-row' : ''} onClick={() => selectConcept(row)}>
+                    <td className="mono">{row.concept_id}</td>
+                    <td>{row.concept_name_ja}</td>
+                    <td><span className={`badge ${row.status === 'active' ? 'succeeded' : 'pending'}`}>{row.status}</span></td>
+                    <td className="mono">{row.mapping_count}</td>
+                    <td>{row.target_unit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <Pager
+              page={page}
+              totalPages={Math.max(1, Math.ceil((data?.total || 0) / (data?.page_size || 100)))}
+              total={data?.total || 0}
+              onPage={setPage}
+            />
+          </div>
+          <div className="concept-editor">
+            {selected ? (
+              <>
+                <h3>{selected.concept_id}</h3>
+                <label>名称<input value={draft.concept_name_ja || ''} onChange={(event) => setDraft({ ...draft, concept_name_ja: event.target.value })} /></label>
+                <label>カテゴリ<input value={draft.category || ''} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
+                <div className="inline-fields">
+                  <label>scope<input value={draft.data_scope || ''} onChange={(event) => setDraft({ ...draft, data_scope: event.target.value })} /></label>
+                  <label>unit<input value={draft.target_unit || ''} onChange={(event) => setDraft({ ...draft, target_unit: event.target.value })} /></label>
+                </div>
+                <div className="inline-fields">
+                  <label>period<input value={draft.period_type || ''} onChange={(event) => setDraft({ ...draft, period_type: event.target.value })} /></label>
+                  <label>status
+                    <select value={draft.status || 'active'} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
+                      <option value="active">active</option>
+                      <option value="merged">merged</option>
+                      <option value="retired">retired</option>
+                    </select>
+                  </label>
+                </div>
+                <label>定義<textarea rows={4} value={draft.definition_ja || ''} onChange={(event) => setDraft({ ...draft, definition_ja: event.target.value })} /></label>
+                <label>計算式<textarea rows={3} value={draft.calculation_formula || ''} onChange={(event) => setDraft({ ...draft, calculation_formula: event.target.value })} /></label>
+                <button onClick={saveConcept}>保存</button>
+                <hr />
+                <h3>統合</h3>
+                <div className="toolbar">
+                  <input value={targetId} onChange={(event) => setTargetId(event.target.value)} placeholder="統合先 concept_id" />
+                  <button className="secondary" onClick={mergeConcept} disabled={!targetId || targetId === selectedId}>統合</button>
+                </div>
+                <h3>分割先を作成</h3>
+                <input value={splitDraft.concept_id} onChange={(event) => setSplitDraft({ ...splitDraft, concept_id: event.target.value })} placeholder="新concept_id（空なら自動）" />
+                <input value={splitDraft.concept_name_ja} onChange={(event) => setSplitDraft({ ...splitDraft, concept_name_ja: event.target.value })} placeholder="新概念名" />
+                <div className="inline-fields">
+                  <input value={splitDraft.category} onChange={(event) => setSplitDraft({ ...splitDraft, category: event.target.value })} placeholder="category" />
+                  <input value={splitDraft.target_unit} onChange={(event) => setSplitDraft({ ...splitDraft, target_unit: event.target.value })} placeholder="target_unit" />
+                </div>
+                <textarea rows={3} value={splitDraft.definition_ja} onChange={(event) => setSplitDraft({ ...splitDraft, definition_ja: event.target.value })} placeholder="定義" />
+                <button className="ghost" onClick={splitConcept} disabled={!splitDraft.concept_name_ja}>分割先作成</button>
+              </>
+            ) : (
+              <Empty message="概念がありません" />
+            )}
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

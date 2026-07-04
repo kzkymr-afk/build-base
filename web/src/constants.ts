@@ -11,7 +11,8 @@ export const tabs = [
   ['mapping_review', 'マッピングレビュー'],
   ['algorithm_audit_findings', 'アルゴリズム監査'],
   ['ai', 'AI分析'],
-  ['report', 'レポート']
+  ['report', 'レポート'],
+  ['concepts', '概念']
 ] as const;
 
 export const tabGroups = [
@@ -33,7 +34,7 @@ export const tabGroups = [
   },
   {
     label: '設定',
-    items: ['fields']
+    items: ['concepts', 'fields']
   }
 ] as const;
 

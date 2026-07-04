@@ -314,6 +314,30 @@ export type MappingProposalsResult = {
   proposals: MappingProposal[];
 };
 
+export type ConceptRow = {
+  concept_id: string;
+  concept_name_ja: string;
+  category: string;
+  data_scope: string;
+  target_unit: string;
+  period_type: string;
+  definition_ja: string;
+  calculation_formula: string;
+  status: string;
+  merged_into_concept_id: string;
+  mapping_count: number;
+  confirmed_mapping_count: number;
+  proposed_mapping_count: number;
+};
+
+export type ConceptListResult = {
+  page: number;
+  page_size: number;
+  total: number;
+  rows: ConceptRow[];
+  status_counts: Record<string, number>;
+};
+
 export type AlgorithmAuditFinding = {
   finding_id: string;
   kind: string;
