@@ -23,400 +23,61 @@ import {
   getCoreRowModel,
   useReactTable
 } from '@tanstack/react-table';
+import { api } from './api';
+import {
+  APP_VERSION_FALLBACK,
+  COLLAPSED_TEXT_COLUMNS,
+  REVIEW_CATEGORY_ORDER,
+  baseColumnLabels,
+  baseColumns,
+  resultHiddenColumns,
+  tabs
+} from './constants';
+import {
+  CORROBORATION_VERDICT_LABELS,
+  type AlgorithmAuditFinding,
+  type AlgorithmAuditFindingsResult,
+  type AlgorithmAuditResult,
+  type AnalysisTableData,
+  type AutomationStatus,
+  type CellDetail,
+  type ChartData,
+  type ChartKind,
+  type ChartMode,
+  type ChartRenderOptions,
+  type ChartSeries,
+  type ChartSource,
+  type ChartViewMode,
+  type CompanyOption,
+  type CorroborationSummary,
+  type DesignPreset,
+  type ExportBackground,
+  type ExportFontScale,
+  type ExportMarginPreset,
+  type ExportPresetId,
+  type ExportSettings,
+  type FactbookOptions,
+  type FactbookStatus,
+  type FieldDefinitionResult,
+  type FieldDefinitionRow,
+  type FieldDefinitionUpdateResult,
+  type FieldOption,
+  type Job,
+  type LegendPosition,
+  type MappingProposal,
+  type MappingProposalsResult,
+  type Options,
+  type Page,
+  type ReviewTarget,
+  type Row,
+  type SeriesRenderKind,
+  type SeriesStyle,
+  type SourceSummary,
+  type Status,
+  type StockMonthlyStatus,
+  type StockOptions
+} from './types';
 import './styles.css';
-
-type Row = Record<string, unknown>;
-
-type Page<T extends Row = Row> = {
-  rows: T[];
-  columns: string[];
-  page: number;
-  page_size: number;
-  total: number;
-  total_pages: number;
-  review_category_counts?: Record<string, number>;
-  review_category_labels?: Record<string, string>;
-};
-
-type Job = {
-  id: string;
-  name: string;
-  status: string;
-  started_at: string;
-  finished_at: string;
-  exit_code: number | null;
-  error: string;
-  logs: string[];
-};
-
-type Status = {
-  app_version?: string;
-  project_root: string;
-  files: Record<string, boolean>;
-  ai_bundle_generated_at_utc: string;
-  algorithm_audit_generated_at_utc?: string;
-  run_report: { summary: Record<string, string>; exists: boolean; path: string };
-};
-
-type AutomationStatus = {
-  as_of: string;
-  enabled: boolean;
-  target_fiscal_year: number | null;
-  annual_window: {
-    in_window: boolean;
-    target_fiscal_year: number | null;
-    window_start: string;
-    window_end: string;
-    next_window_start: string;
-    next_window_target_fiscal_year: number | null;
-    message: string;
-  };
-  review_gate: {
-    ready: boolean;
-    active_review_items: number;
-    saved_unapplied_reviews: number;
-    review_queue_items: number;
-    resolved_reviews: number;
-    blocking_reasons: string[];
-    algorithm_audit?: {
-      exists: boolean;
-      generated_at_utc: string;
-      age_days: number | null;
-      max_age_days: number;
-      stale: boolean;
-    };
-  };
-  company_year_roll_forward: {
-    target_fiscal_year: number | null;
-    existing_rows: number;
-    planned_rows: number;
-    planned_company_year_ids: string[];
-  };
-  sources: {
-    total: number;
-    enabled: number;
-    planned: number;
-  };
-};
-
-type StockMonthlyStatus = {
-  enabled: boolean;
-  provider: string;
-  cadence: string;
-  as_of: string;
-  run_day_of_month: number;
-  due: boolean;
-  target_month: string;
-  latest_month: string;
-  last_run_at_utc: string;
-  last_status: string;
-  last_successful_month: string;
-  last_error_count: number;
-  last_ignored_listing_error_count?: number;
-  price_rows: number;
-  total_securities: number;
-  enabled_securities: number;
-  output_path: string;
-  security_master_path: string;
-  message: string;
-};
-
-type CompanyOption = {
-  id: string;
-  name: string;
-  label: string;
-};
-
-type FieldOption = {
-  id: string;
-  name: string;
-  category: string;
-  unit: string;
-  label: string;
-};
-
-type FieldDefinitionRow = {
-  field_id: string;
-  field_name_ja: string;
-  category: string;
-  category_label?: string;
-  target_unit: string;
-  data_scope_required: string;
-  period_type: string;
-  preferred_method: string;
-  xbrl_tag_candidates: string;
-  context_filters: string;
-  section_keywords: string;
-  synonyms_ja: string;
-  calculation_formula: string;
-  validation_rule_ids: string;
-  review_threshold: string;
-  notes: string;
-};
-
-type FieldDefinitionResult = {
-  path: string;
-  rows: FieldDefinitionRow[];
-  columns: string[];
-  editable_columns: string[];
-  categories: Array<{ id: string; label: string }>;
-  total: number;
-  all_total: number;
-};
-
-type FieldDefinitionUpdateResult = {
-  path: string;
-  field: FieldDefinitionRow;
-  changed_columns: string[];
-  backup_path: string;
-  xlsx_written: string;
-};
-
-type FieldPreset = {
-  id: string;
-  name: string;
-  fields: string[];
-};
-
-type Options = {
-  companies: CompanyOption[];
-  years: string[];
-  fields: FieldOption[];
-  default_result_fields: string[];
-  field_presets: FieldPreset[];
-};
-
-type StockOptions = {
-  companies: CompanyOption[];
-  months: string[];
-  fields: FieldOption[];
-  default_result_fields: string[];
-  field_presets: FieldPreset[];
-};
-
-type FactbookStatus = {
-  enabled: boolean;
-  cadence: string;
-  as_of: string;
-  source_count: number;
-  enabled_source_count: number;
-  order_rows: number;
-  parsed_order_rows: number;
-  source_documents: number;
-  unsupported_documents: number;
-  latest_fiscal_year: string;
-  last_run_at_utc: string;
-  last_status: string;
-  last_error_count: number;
-  output_path: string;
-  source_document_path: string;
-  message: string;
-};
-
-type FactbookOptions = {
-  companies: CompanyOption[];
-  years: string[];
-  category_types: string[];
-  fields: FieldOption[];
-  default_result_fields: string[];
-  field_presets: FieldPreset[];
-};
-
-type ReviewTarget = {
-  company: string;
-  fiscal_year: string;
-  field_id: string;
-};
-
-type CellDetail = {
-  company_year_id: string;
-  company_id: string;
-  fiscal_year: string;
-  field_id: string;
-  field_name_ja: string;
-  unit: string;
-  data_scope_required: string;
-  preferred_method: string;
-  current_value: string;
-  is_blank: boolean;
-  status: string;
-  status_label: string;
-  summary: string;
-  next_action: string;
-  has_source_audit: boolean;
-  has_review_candidate: boolean;
-  failure_reason: string;
-  wide_row: Row;
-  audit_rows: Row[];
-  review_rows: Row[];
-  resolved_rows: Row[];
-};
-
-type AlgorithmAuditResult = {
-  generated_at_utc: string;
-  bundle_dir: string;
-  summary: Record<string, unknown>;
-  files: Array<{ file: string; source?: string; description: string; bytes: number }>;
-  prompt: string;
-  prompt_path: string;
-  readme_path: string;
-};
-
-type CorroborationSummary = {
-  status?: string;
-  cells_total?: number;
-  corroborated_2plus?: number;
-  corroborated_1?: number;
-  corroborated_0?: number;
-  conflicts?: number;
-  auto_accepted_with_zero_corroboration?: number;
-  extraction_method_counts?: Record<string, number>;
-  validation_rule_status_counts?: Record<string, Record<string, number>>;
-  notes?: string[];
-};
-
-type MappingProposal = {
-  mapping_id: string;
-  action: string;
-  status: string;
-  decided_by: string;
-  decided_by_kind: string;
-  confidence: number | null;
-  rationale: string;
-  new_concept_proposal: { concept_name_ja?: string; category?: string; definition_ja?: string } | null;
-  observed_item: {
-    observed_item_id: string;
-    item_kind: string;
-    element_id: string;
-    element_local_name: string;
-    label_ja: string;
-    normalized_scope: string;
-    unit: string;
-    taxonomy_kind: string;
-    section_name: string;
-    sample_values: Record<string, unknown>;
-  };
-  concept: { concept_id: string; concept_name_ja: string; category: string; data_scope: string; target_unit: string } | null;
-  corroboration?: {
-    overlap_count: number;
-    match_count: number;
-    match_rate: number;
-    verdict: 'corroborated' | 'conflicts' | 'unverifiable' | 'weak';
-    examples: { company_year_id: string; element_value: number; concept_value: number; matched: boolean }[];
-  };
-};
-
-const CORROBORATION_VERDICT_LABELS: Record<string, string> = {
-  corroborated: '数値一致 ✓ 承認して安全',
-  conflicts: '数値不一致 ✗ 別物の可能性大（却下推奨）',
-  unverifiable: '照合不能（概念側に既存値なし）',
-  weak: '部分一致（要確認）',
-};
-
-type MappingProposalsResult = {
-  total: number;
-  action_counts: Record<string, number>;
-  proposals: MappingProposal[];
-};
-
-type AlgorithmAuditFinding = {
-  finding_id: string;
-  kind: string;
-  severity: 'high' | 'medium' | 'low' | 'info';
-  target: string;
-  evidence: Record<string, unknown>;
-  suggested_action: string;
-};
-
-type AlgorithmAuditFindingsResult = {
-  status?: string;
-  generated_at_utc?: string;
-  summary?: { total: number; by_kind: Record<string, number>; by_severity: Record<string, number> };
-  findings?: AlgorithmAuditFinding[];
-};
-
-type ChartData = {
-  rows: Row[];
-  columns: string[];
-  total: number;
-  omitted_rows: number;
-  fields: FieldOption[];
-  companies: CompanyOption[];
-  years: string[];
-  sources?: SourceSummary[];
-};
-
-type AnalysisTableData = {
-  rows: Row[];
-  columns: string[];
-  labels: Record<string, string>;
-  fieldName: string;
-  unit: string;
-};
-
-type SourceSummary = {
-  company_year_id: string;
-  company_name: string;
-  period: string;
-  field_id: string;
-  field_name: string;
-  value: string;
-  unit: string;
-  data_scope: string;
-  source_doc_id: string;
-  source_file: string;
-  source_heading: string;
-  source_quote: string;
-  extraction_method: string;
-  confidence: string;
-};
-
-type ChartKind = 'line' | 'bar' | 'combo' | 'scatter';
-type ChartMode = 'trend' | 'company';
-type ChartSource = 'financial' | 'stock' | 'factbook_orders';
-type ChartViewMode = 'chart' | 'table';
-type SeriesRenderKind = 'line' | 'bar';
-type ExportPresetId = 'wide' | 'half' | 'standard' | 'panorama';
-type ExportBackground = 'white' | 'transparent';
-type ExportMarginPreset = 'compact' | 'standard' | 'wide';
-type ExportFontScale = 'small' | 'standard' | 'large';
-type LegendPosition = 'none' | 'top' | 'bottom' | 'right';
-type DesignPreset = 'sharp' | 'report' | 'minimal';
-
-type ChartSeries = {
-  key: string;
-  label: string;
-  fieldId: string;
-  fieldName: string;
-  unit: string;
-  companyName?: string;
-};
-
-type SeriesStyle = {
-  color?: string;
-  strokeWidth?: number;
-  strokeDasharray?: string;
-  renderAs?: SeriesRenderKind;
-};
-
-type ExportSettings = {
-  presetId: ExportPresetId;
-  width: number;
-  height: number;
-  pixelRatio: 1 | 2 | 3;
-  background: ExportBackground;
-  marginPreset: ExportMarginPreset;
-  fontScale: ExportFontScale;
-  legendPosition: LegendPosition;
-  directLineLabels: boolean;
-  designPreset: DesignPreset;
-};
-
-type ChartRenderOptions = {
-  height: number;
-  exportMode: boolean;
-  exportSettings: ExportSettings;
-};
 
 const exportSizePresets = [
   { id: 'wide', label: '16:9 全幅', width: 1280, height: 720 },
@@ -661,53 +322,6 @@ const auditListColumns = [
   'confidence'
 ];
 
-const tabs = [
-  ['run', '実行'],
-  ['results', '結果'],
-  ['fields', '項目整理'],
-  ['stocks', '株価'],
-  ['factbooks', 'ファクトブック'],
-  ['charts', 'グラフ'],
-  ['audit', '根拠'],
-  ['review', 'レビュー'],
-  ['mapping_review', 'マッピングレビュー'],
-  ['algorithm_audit_findings', 'アルゴリズム監査'],
-  ['ai', 'AI分析'],
-  ['report', 'レポート']
-] as const;
-
-const APP_VERSION_FALLBACK = '0.17.2';
-const COLLAPSED_TEXT_COLUMNS = new Set(['source_quote', 'quotes']);
-const REVIEW_CATEGORY_ORDER = ['missing', 'new_candidate', 'validation_issue', 'scope_warning', 'warning_candidate', 'saved_unapplied', 'recurrent', 'resolved_done'];
-
-const baseColumns = new Set([
-  'company_year_id',
-  'fiscal_year',
-  'fiscal_year_end',
-  'operating_company_id',
-  'operating_company_name',
-  'reporting_entity_id',
-  'data_scope_allowed',
-  'analysis_treatment'
-]);
-
-const resultHiddenColumns = new Set([
-  'company_year_id',
-  'operating_company_id',
-  'reporting_entity_id'
-]);
-
-const baseColumnLabels: Record<string, string> = {
-  company_year_id: '会社年度',
-  fiscal_year: '年度',
-  fiscal_year_end: '決算日',
-  operating_company_id: '会社ID',
-  operating_company_name: '会社名',
-  reporting_entity_id: '開示主体',
-  data_scope_allowed: '対象スコープ',
-  analysis_treatment: '分析上の扱い'
-};
-
 function onlyExistingColumns(columns: string[], desired: string[]): string[] {
   return desired.filter((column) => columns.includes(column));
 }
@@ -747,18 +361,6 @@ function renderCellValue(column: string, value: unknown) {
     return renderClampedText(value);
   }
   return String(value ?? '');
-}
-
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    ...init
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
 }
 
 function useOptions() {
