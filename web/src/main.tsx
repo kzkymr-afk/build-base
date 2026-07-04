@@ -68,6 +68,7 @@ import {
   type MappingProposalsResult,
   type Options,
   type Page,
+  type ReconciliationGroupsResult,
   type RegressionSummary,
   type ReviewTarget,
   type Row,
@@ -533,6 +534,7 @@ function App() {
         {tab === 'charts' && <ChartsPanel refreshToken={dataRefreshToken} />}
         {tab === 'audit' && <AuditPanel initialTarget={auditTarget} refreshToken={dataRefreshToken} />}
         {tab === 'review' && <ReviewPanel initialTarget={reviewTarget} job={job} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
+        {tab === 'reconciliation' && <ReconciliationPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'mapping_review' && <MappingReviewPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'algorithm_audit_findings' && <AlgorithmAuditFindingsPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'ai' && <AiPanel onError={setError} />}
@@ -3988,6 +3990,115 @@ function ReportPanel({ status, refreshToken, job, onJob, onError }: {
 function corroborationPercent(part: number | undefined, total: number | undefined): string {
   if (!total || part == null) return '-';
   return `${((part / total) * 100).toFixed(1)}%`;
+}
+
+function ReconciliationPanel({ onError, refreshToken }: { onError: (message: string) => void; refreshToken: number }) {
+  const [data, setData] = React.useState<ReconciliationGroupsResult | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = React.useState('');
+  const [note, setNote] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    api<ReconciliationGroupsResult>('/api/reconciliation/groups')
+      .then((result) => {
+        setData(result);
+        if (!selectedGroupId && result.groups.length) {
+          setSelectedGroupId(result.groups[0].group_id);
+        }
+      })
+      .catch((err) => onError(String(err)));
+  }, [onError, selectedGroupId]);
+
+  React.useEffect(() => {
+    load();
+  }, [load, refreshToken]);
+
+  const selected = data?.groups.find((group) => group.group_id === selectedGroupId) || null;
+
+  async function acceptGroup() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage('');
+    try {
+      const result = await api<{ applied_items: number; total: number }>('/api/reconciliation/apply', {
+        method: 'POST',
+        body: JSON.stringify({
+          group_id: selected.group_id,
+          decision: 'accept',
+          reviewer_note: note || `checked reconciliation group: ${selected.rule_id}`,
+          reviewer: 'web',
+        }),
+      });
+      setMessage(`保存しました: ${result.applied_items}件 / resolved合計 ${result.total}件`);
+      load();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="stack">
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>照合グループレビュー</h2>
+            <p className="muted">identity_group_mismatch を rule_id ごとに確認し、既存のレビュー保存フローへ一括反映します。</p>
+          </div>
+          <span className="badge">groups {data?.total ?? '-'}</span>
+        </div>
+        {message && <div className="notice">{message}</div>}
+        <div className="reconciliation-layout">
+          <div className="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>group</th>
+                  <th>items</th>
+                  <th>company_year</th>
+                  <th>fields</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(data?.groups || []).map((group) => (
+                  <tr key={group.group_id} className={group.group_id === selectedGroupId ? 'selected-row' : ''} onClick={() => setSelectedGroupId(group.group_id)}>
+                    <td className="mono">{group.rule_id}</td>
+                    <td className="mono">{group.item_count}</td>
+                    <td className="mono">{group.company_year_count}</td>
+                    <td className="mono">{group.field_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="concept-editor">
+            {selected ? (
+              <>
+                <h3>{selected.rule_id}</h3>
+                <div className="detail-grid">
+                  <div><small>items</small><strong>{selected.item_count}</strong></div>
+                  <div><small>company_year</small><strong>{selected.company_year_count}</strong></div>
+                  <div><small>fields</small><strong>{selected.field_count}</strong></div>
+                </div>
+                <label>メモ<textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="判断メモ" /></label>
+                <button onClick={acceptGroup} disabled={saving}>グループをaccept保存</button>
+                <MiniRows
+                  title="サンプル"
+                  rows={selected.sample_rows}
+                  columns={['company_year_id', 'field_id', 'field_name_ja', 'existing_value', 'extracted_value', 'review_reason']}
+                  emptyMessage="サンプル行はありません。"
+                />
+              </>
+            ) : (
+              <Empty message="照合グループはありません。" />
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 const MAPPING_ACTION_LABELS: Record<string, string> = {

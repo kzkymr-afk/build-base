@@ -8,6 +8,7 @@ export const tabs = [
   ['charts', 'グラフ'],
   ['audit', '根拠'],
   ['review', 'レビュー'],
+  ['reconciliation', '照合グループ'],
   ['mapping_review', 'マッピングレビュー'],
   ['algorithm_audit_findings', 'アルゴリズム監査'],
   ['ai', 'AI分析'],
@@ -26,7 +27,7 @@ export const tabGroups = [
   },
   {
     label: '品質レビュー',
-    items: ['review', 'mapping_review', 'algorithm_audit_findings']
+    items: ['review', 'reconciliation', 'mapping_review', 'algorithm_audit_findings']
   },
   {
     label: '運用',

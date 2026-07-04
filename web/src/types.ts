@@ -346,6 +346,20 @@ export type ConceptListResult = {
   status_counts: Record<string, number>;
 };
 
+export type ReconciliationGroup = {
+  group_id: string;
+  rule_id: string;
+  item_count: number;
+  company_year_count: number;
+  field_count: number;
+  sample_rows: Row[];
+};
+
+export type ReconciliationGroupsResult = {
+  total: number;
+  groups: ReconciliationGroup[];
+};
+
 export type AlgorithmAuditFinding = {
   finding_id: string;
   kind: string;

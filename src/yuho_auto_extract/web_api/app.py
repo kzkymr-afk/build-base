@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuho_auto_extract import __version__
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts, reconciliation
 from yuho_auto_extract.web_api.jobs import JobAlreadyRunning, JobManager
 
 
@@ -111,6 +111,14 @@ class ConceptMergeRequest(BaseModel):
 class ConceptSplitRequest(BaseModel):
     source_concept_id: str
     new_concepts: List[Dict[str, Any]]
+
+
+class ReconciliationApplyRequest(BaseModel):
+    group_id: str
+    decision: str
+    corrected_value: Any = ""
+    reviewer_note: str = ""
+    reviewer: str = ""
 
 
 @app.get("/api/status")
@@ -447,6 +455,26 @@ def mark_not_applicable(request: NotApplicableRequest) -> Dict[str, Any]:
             note=request.note,
             start_year=request.start_year,
             end_year=request.end_year,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/reconciliation/groups")
+def reconciliation_groups(limit: int = Query(200, ge=1, le=1000)) -> Dict[str, Any]:
+    return reconciliation.read_reconciliation_groups(PROJECT_ROOT, limit=limit)
+
+
+@app.post("/api/reconciliation/apply")
+def apply_reconciliation_group(request: ReconciliationApplyRequest) -> Dict[str, Any]:
+    try:
+        return reconciliation.apply_reconciliation_group(
+            PROJECT_ROOT,
+            request.group_id,
+            decision=request.decision,
+            corrected_value=request.corrected_value,
+            reviewer_note=request.reviewer_note,
+            reviewer=request.reviewer,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
