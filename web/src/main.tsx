@@ -1097,6 +1097,7 @@ function ResultsPanel({
   const [page, setPage] = React.useState(1);
   const [company, setCompany] = React.useState('');
   const [year, setYear] = React.useState('');
+  const [periodType, setPeriodType] = React.useState('annual');
   const [preset, setPreset] = React.useState('all');
   const [data, setData] = React.useState<Page | null>(null);
   const [error, setError] = React.useState('');
@@ -1119,9 +1120,9 @@ function ResultsPanel({
 
   React.useEffect(() => {
     if (!options) return;
-    const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, fields: selectedFields });
+    const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, period_type: periodType, fields: selectedFields });
     api<Page>(`/api/datasets/wide?${params}`).then(setData).catch((err) => setError(String(err)));
-  }, [options, page, company, year, selectedFields, refreshToken]);
+  }, [options, page, company, year, periodType, selectedFields, refreshToken]);
 
   function resetPage(next: () => void) {
     setPage(1);
@@ -1165,6 +1166,14 @@ function ResultsPanel({
             <option value="">全年度</option>
             {(options?.years || []).map((item) => (
               <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field small">
+          <span>期間</span>
+          <select value={periodType} onChange={(e) => resetPage(() => setPeriodType(e.target.value))}>
+            {(options?.period_types || ['annual']).map((item) => (
+              <option key={item} value={item}>{periodTypeLabel(item)}</option>
             ))}
           </select>
         </label>
@@ -2854,6 +2863,7 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const { options: factbookOptions, error: factbookOptionsError } = useFactbookOptions();
   const exportRef = React.useRef<HTMLDivElement>(null);
   const [chartSource, setChartSource] = React.useState<ChartSource>('financial');
+  const [periodType, setPeriodType] = React.useState('annual');
   const [viewMode, setViewMode] = React.useState<ChartViewMode>('chart');
   const [chartKind, setChartKind] = React.useState<ChartKind>('line');
   const [mode, setMode] = React.useState<ChartMode>('trend');
@@ -2927,6 +2937,7 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
       source: chartSource,
       companies: selectedCompanies.join(','),
       fiscal_years: selectedYears.join(','),
+      period_type: periodType,
       fields: queryFields.join(','),
       max_rows: '5000'
     });
@@ -2936,7 +2947,7 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
         setError('');
       })
       .catch((err) => setError(String(err)));
-  }, [activeOptions, chartSource, selectedCompanies, selectedYears, queryFields, refreshToken, hasRequiredSelections]);
+  }, [activeOptions, chartSource, selectedCompanies, selectedYears, periodType, queryFields, refreshToken, hasRequiredSelections]);
 
   if (!options || (chartSource === 'stock' && !stockOptions) || (chartSource === 'factbook_orders' && !factbookOptions)) {
     return <Empty message="グラフ設定を読み込み中です。" />;
@@ -3146,6 +3157,16 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
             <option value="table">表</option>
           </select>
         </label>
+        {chartSource === 'financial' && (
+          <label className="filter-field small">
+            <span>期間</span>
+            <select value={periodType} onChange={(e) => setPeriodType(e.target.value)}>
+              {(options?.period_types || ['annual']).map((item) => (
+                <option key={item} value={item}>{periodTypeLabel(item)}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {viewMode === 'chart' && (
           <label className="filter-field small">
             <span>種類</span>
@@ -4952,6 +4973,12 @@ function chartSourceLabel(source: ChartSource): string {
   if (source === 'stock') return ' / 月次株価';
   if (source === 'factbook_orders') return ' / ファクトブック受注';
   return ' / 有報';
+}
+
+function periodTypeLabel(periodType: string): string {
+  if (periodType === 'annual') return '年次';
+  if (periodType === 'semiannual_h1') return '半期';
+  return periodType || '年次';
 }
 
 function factbookCategoryTypeLabel(value: string): string {

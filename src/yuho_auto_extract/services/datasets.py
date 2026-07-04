@@ -202,6 +202,7 @@ def read_wide(
     page_size: int = 100,
     company: str = "",
     fiscal_year: str = "",
+    period_type: str = "annual",
     fields: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     rows = read_table(root / "data" / "final" / "final_master_wide.csv")
@@ -211,6 +212,8 @@ def read_wide(
         if company and str(row.get("operating_company_id", "")) != company:
             continue
         if fiscal_year and str(row.get("fiscal_year", "")) != str(fiscal_year):
+            continue
+        if period_type and str(row.get("period_type") or "annual") != period_type:
             continue
         filtered.append(row)
     selected_fields = [field for field in (fields or []) if field] or DEFAULT_RESULT_FIELDS
@@ -224,6 +227,7 @@ def read_chart_data(
     root: Path,
     companies: Optional[Sequence[str]] = None,
     fiscal_years: Optional[Sequence[str]] = None,
+    period_type: str = "annual",
     fields: Optional[Sequence[str]] = None,
     max_rows: int = 5000,
 ) -> Dict[str, Any]:
@@ -252,11 +256,14 @@ def read_chart_data(
             continue
         if year_filter and fiscal_year not in year_filter:
             continue
+        if period_type and str(row.get("period_type") or "annual") != period_type:
+            continue
         row_with_derived = _with_derived_values(row, selected_fields)
         chart_row = {
             "company_year_id": row.get("company_year_id", ""),
             "fiscal_year": fiscal_year,
             "fiscal_year_end": row.get("fiscal_year_end", ""),
+            "period_type": row.get("period_type") or "annual",
             "operating_company_id": company_id,
             "operating_company_name": row.get("operating_company_name", ""),
         }
@@ -304,7 +311,9 @@ def read_fields(root: Path) -> Dict[str, Any]:
 
 def read_options(root: Path) -> Dict[str, Any]:
     companies = read_table(root / "config" / "company_master.csv")
-    years = sorted({str(row.get("fiscal_year", "")) for row in read_table(root / "config" / "company_year_master.csv") if row.get("fiscal_year")})
+    company_years = read_table(root / "config" / "company_year_master.csv")
+    years = sorted({str(row.get("fiscal_year", "")) for row in company_years if row.get("fiscal_year")})
+    period_types = sorted({str(row.get("period_type") or "annual") for row in company_years})
     fields = list(_field_definitions(root).values())
     return {
         "companies": [
@@ -317,6 +326,7 @@ def read_options(root: Path) -> Dict[str, Any]:
             if row.get("operating_company_id")
         ],
         "years": years,
+        "period_types": period_types,
         "fields": [
             {
                 "id": str(row.get("field_id", "")),

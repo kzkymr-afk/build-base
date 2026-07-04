@@ -26,3 +26,24 @@ securities_report:
     checked_on: "2026-06-15"
     source_url: https://disclosure2dl.edinet-fsa.go.jp/guide/static/disclosure/download/ESE140327.xlsx
     note: "建設会社PoCでは内国会社の第三号様式 030000 と訂正 030001 を主対象にする。その他候補は保険的に保持。"
+
+semiannual_report:
+  doc_description_include:
+    - 半期報告書
+  doc_description_exclude:
+    - 四半期
+    - 臨時
+    - 確認書
+  correction_doc_description_include:
+    - 訂正半期報告書
+  ordinance_code_candidates:
+    - "010"
+  form_code_candidates:
+    - "043A00"
+    - "043A01"
+  prefer_latest_correction: true
+  official_reference:
+    title: EDINET API仕様書 別紙1_様式コードリスト
+    checked_on: "2026-07-04"
+    source_url: https://disclosure2dl.edinet-fsa.go.jp/guide/static/disclosure/download/ESE140327.xlsx
+    note: "2024年11月提出のゼネコン半期報告書で formCode=043A00、訂正半期報告書で 043A01 を実地確認。旧四半期報告書は対象外。"

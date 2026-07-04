@@ -154,6 +154,7 @@ export type FieldPreset = {
 export type Options = {
   companies: CompanyOption[];
   years: string[];
+  period_types: string[];
   fields: FieldOption[];
   default_result_fields: string[];
   field_presets: FieldPreset[];

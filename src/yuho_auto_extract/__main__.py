@@ -428,7 +428,7 @@ def cmd_build_review_queue(root: Path, args: argparse.Namespace) -> int:
     exclusions = read_table(exclusions_path) if exclusions_path.exists() else []
     cell_resolutions = _load_cell_resolutions_for_review_queue(root, cfg)
     queue = build_review_queue(
-        rows, cfg.field_definition, cfg.company_year_master, existing, exclusions, cell_resolutions
+        rows, cfg.field_definition, _annual_company_years(cfg.company_year_master), existing, exclusions, cell_resolutions
     )
     written = write_table(root / "data" / "review" / "review_queue.xlsx", queue)
     write_table(root / "data" / "review" / "review_queue.csv", queue)
@@ -478,6 +478,7 @@ def cmd_import_manual_technicians(root: Path, args: argparse.Namespace) -> int:
 
 def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
     cfg = load_pipeline_config(root)
+    annual_company_years = _annual_company_years(cfg.company_year_master)
     extracted = _read_validated_or_normalized(root)
     reviewed_path = prefer_existing_table(root / args.reviewed)
     reviewed = read_table(reviewed_path) if reviewed_path.exists() else []
@@ -489,7 +490,8 @@ def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
         row["resolution"] = row.get("corroboration_status", "")
     long_path = write_table(root / "data" / "final" / "final_master_long.parquet", exportable)
     long_csv_path = write_table(root / "data" / "final" / "final_master_long.csv", exportable)
-    wide = build_wide_values(exportable, cfg.company_year_master, cfg.field_definition)
+    exportable = [row for row in exportable if _company_year_period_type(str(row.get("company_year_id") or ""), annual_company_years) == "annual"]
+    wide = build_wide_values(exportable, annual_company_years, cfg.field_definition)
     wide_path = write_table(root / "data" / "final" / "wide_values.xlsx", wide)
     audit = build_source_audit(exportable, cfg.field_definition)
     audit_path = write_table(root / "data" / "final" / "source_audit.xlsx", audit)
@@ -497,13 +499,24 @@ def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
     write_table(root / "data" / "final" / "final_master_wide.csv", wide)
     write_table(root / "data" / "final" / "source_audit.csv", audit)
     final_wide_path = root / "data" / "final" / "final_master_wide.xlsx"
-    _write_final_workbook(final_wide_path, wide, audit, cfg.field_definition, cfg.company_year_master)
+    _write_final_workbook(final_wide_path, wide, audit, cfg.field_definition, annual_company_years)
     print(f"wrote {long_path} rows={len(exportable)}")
     print(f"wrote {long_csv_path} rows={len(exportable)}")
     print(f"wrote {wide_path} rows={len(wide)}")
     print(f"wrote {audit_path}")
     print(f"wrote {final_wide_path}")
     return 0
+
+
+def _annual_company_years(company_years: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [row for row in company_years if str(row.get("period_type") or "annual") == "annual"]
+
+
+def _company_year_period_type(company_year_id: str, annual_company_years: Iterable[Dict[str, Any]]) -> str:
+    annual_ids = {str(row.get("company_year_id") or "") for row in annual_company_years}
+    if company_year_id in annual_ids:
+        return "annual"
+    return "non_annual"
 
 
 def cmd_build_analysis(root: Path, args: argparse.Namespace) -> int:

@@ -12,9 +12,7 @@ def fiscal_year_from_period_end(period_end: Any, fiscal_year_end_month: int) -> 
         dt = datetime.strptime(text, "%Y-%m-%d")
     except ValueError:
         return None
-    if fiscal_year_end_month == 12:
-        return dt.year
-    return dt.year - 1
+    return dt.year if dt.month > fiscal_year_end_month or fiscal_year_end_month == 12 else dt.year - 1
 
 
 def is_correction(doc: Dict[str, Any], cfg: Dict[str, Any]) -> bool:
@@ -40,6 +38,13 @@ def is_target_securities_report(doc: Dict[str, Any], cfg: Dict[str, Any]) -> boo
     return str(doc.get("withdrawalStatus", "0")) != "1" and str(doc.get("disclosureStatus", "0")) != "1"
 
 
+def document_filter_for_period(document_filter: Dict[str, Any], period_type: str) -> Dict[str, Any]:
+    period = period_type or "annual"
+    if period == "semiannual_h1":
+        return document_filter.get("semiannual_report", document_filter.get("securities_report", document_filter))
+    return document_filter.get("securities_report", document_filter)
+
+
 def resolve_target_documents(
     document_index: Iterable[Dict[str, Any]],
     company_master: Iterable[Dict[str, Any]],
@@ -48,13 +53,14 @@ def resolve_target_documents(
     fiscal_years: Optional[Iterable[int]] = None,
 ) -> List[Dict[str, Any]]:
     docs = list(document_index)
-    securities_cfg = document_filter.get("securities_report", document_filter)
     requested_years = set(int(year) for year in fiscal_years) if fiscal_years else None
     companies = {str(row["operating_company_id"]): row for row in company_master}
     outputs: List[Dict[str, Any]] = []
     for company_year in company_year_master:
         company_year_id = str(company_year["company_year_id"])
         fiscal_year = int(company_year["fiscal_year"])
+        period_type = str(company_year.get("period_type") or "annual")
+        report_cfg = document_filter_for_period(document_filter, period_type)
         if requested_years and fiscal_year not in requested_years:
             continue
         company = companies.get(str(company_year["operating_company_id"]))
@@ -67,13 +73,13 @@ def resolve_target_documents(
             doc
             for doc in docs
             if str(doc.get("edinetCode", "")) == str(reporting_company.get("edinet_code", ""))
-            and is_target_securities_report(doc, securities_cfg)
+            and is_target_securities_report(doc, report_cfg)
             and fiscal_year_from_period_end(doc.get("periodEnd"), int(reporting_company.get("fiscal_year_end_month") or 3)) == fiscal_year
         ]
         if not candidates:
             outputs.append(_failure(company_year, "target_document_not_found"))
             continue
-        chosen = choose_effective_document(candidates, securities_cfg)
+        chosen = choose_effective_document(candidates, report_cfg)
         output = dict(chosen)
         output.update(
             {
@@ -82,6 +88,7 @@ def resolve_target_documents(
                 "operating_company_name": company.get("operating_company_name"),
                 "fiscal_year": fiscal_year,
                 "fiscal_year_end": company_year.get("fiscal_year_end"),
+                "period_type": period_type,
                 "reporting_entity_id": reporting_entity_id,
                 "reporting_entity_name": reporting_company.get("operating_company_name"),
                 "reporting_entity_edinet_code": reporting_company.get("edinet_code"),
@@ -89,7 +96,7 @@ def resolve_target_documents(
                 "analysis_treatment": company_year.get("analysis_treatment"),
                 "candidate_doc_ids": ";".join(str(doc.get("docID", "")) for doc in candidates),
                 "resolution_status": "resolved",
-                "is_correction": is_correction(chosen, securities_cfg),
+                "is_correction": is_correction(chosen, report_cfg),
             }
         )
         outputs.append(output)
@@ -113,6 +120,7 @@ def _failure(company_year: Dict[str, Any], reason: str) -> Dict[str, Any]:
         "operating_company_id": company_year.get("operating_company_id"),
         "fiscal_year": company_year.get("fiscal_year"),
         "fiscal_year_end": company_year.get("fiscal_year_end"),
+        "period_type": company_year.get("period_type") or "annual",
         "reporting_entity_id": company_year.get("reporting_entity_id"),
         "transition_year_flag": company_year.get("transition_year_flag"),
         "analysis_treatment": company_year.get("analysis_treatment"),

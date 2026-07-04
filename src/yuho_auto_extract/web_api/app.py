@@ -305,10 +305,11 @@ def wide(
     page_size: int = Query(100, ge=1, le=500),
     company: str = "",
     fiscal_year: str = "",
+    period_type: str = "annual",
     fields: str = "",
 ) -> Dict[str, Any]:
     field_list = [field.strip() for field in fields.split(",") if field.strip()]
-    return datasets.read_wide(PROJECT_ROOT, page=page, page_size=page_size, company=company, fiscal_year=fiscal_year, fields=field_list)
+    return datasets.read_wide(PROJECT_ROOT, page=page, page_size=page_size, company=company, fiscal_year=fiscal_year, period_type=period_type, fields=field_list)
 
 
 @app.get("/api/datasets/audit")
@@ -360,6 +361,7 @@ def chart_data(
     source: str = "financial",
     companies: str = "",
     fiscal_years: str = "",
+    period_type: str = "annual",
     fields: str = "",
     max_rows: int = Query(5000, ge=1, le=20000),
 ) -> Dict[str, Any]:
@@ -383,6 +385,7 @@ def chart_data(
         PROJECT_ROOT,
         companies=_split_csv(companies),
         fiscal_years=_split_csv(fiscal_years),
+        period_type=period_type,
         fields=_split_csv(fields),
         max_rows=max_rows,
     )
