@@ -53,6 +53,7 @@ RELATIVE_YEAR_CURRENT = ("当期", "当期末")
 # 数値裏取りの確定閾値（仕様書§1.4で実データ検証済み）。
 MIN_OVERLAP_COUNT = 3
 MIN_MATCH_RATE = 0.8
+FinalValue = Tuple[float, str]
 
 
 def _now_utc_iso() -> str:
@@ -66,14 +67,14 @@ def _now_utc_iso() -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_final_master_long_index(root: Path) -> Dict[Tuple[str, str], List[float]]:
-    """final_master_long.csv を1回読み込み、(company_year_id, field_id) -> [value_normalized(百万円)] に畳み込む。
+def load_final_master_long_index(root: Path) -> Dict[Tuple[str, str], List[FinalValue]]:
+    """final_master_long.csv を1回読み込み、(company_year_id, field_id) -> [(value_normalized, unit)] に畳み込む。
 
     同一キーに複数行がある場合は全て保持する（呼び出し側で len==1 の場合のみ
     一意な値として採用する設計のため、ここでは畳み込まず素直にリストへ積む）。
     """
     path = root / FINAL_MASTER_LONG_RELATIVE_PATH
-    index: Dict[Tuple[str, str], List[float]] = defaultdict(list)
+    index: Dict[Tuple[str, str], List[FinalValue]] = defaultdict(list)
     if not path.exists():
         return index
     with open(path, newline="", encoding="utf-8") as f:
@@ -84,17 +85,33 @@ def load_final_master_long_index(root: Path) -> Dict[Tuple[str, str], List[float
             if not company_year_id or not field_id:
                 continue
             unit_normalized = str(row.get("unit_normalized") or "")
-            if unit_normalized and unit_normalized != "百万円":
-                # 単位が百万円以外（例: '%', '歳', '人'）の場合は円建て突合の
-                # 対象外。呼び出し側の overlap 判定から自然に除外されるよう、
-                # そもそも索引に積まない。
-                continue
             raw_value = row.get("value_normalized")
             value = _parse_fact_value(raw_value)
             if value is None:
                 continue
-            index[(company_year_id, field_id)].append(value)
+            index[(company_year_id, field_id)].append((value, unit_normalized))
     return index
+
+
+def comparable_fact_value(raw_fact_value: float, observed_unit: str, concept_unit: str) -> Optional[float]:
+    """XBRL fact値をfinal_master_longの単位に合わせる。
+
+    従来は全factを円として百万円へ変換していたため、%などの非金額指標が照合不能
+    だった。%はそのまま百分点として比較し、金額は従来どおり円->百万円に変換する。
+    """
+    observed_unit = str(observed_unit or "")
+    concept_unit = str(concept_unit or "")
+    if concept_unit == "%" or observed_unit == "%":
+        return raw_fact_value
+    if concept_unit in {"百万円", ""}:
+        return round(raw_fact_value / 1_000_000, 6)
+    return raw_fact_value
+
+
+def values_match_for_unit(concept_value: float, element_value: float, concept_unit: str) -> bool:
+    concept_unit = str(concept_unit or "")
+    tolerance = 0.5 if concept_unit == "%" else max(1.0, abs(concept_value) * 0.001)
+    return abs(concept_value - element_value) <= tolerance
 
 
 def open_edinet_db_readonly(root: Path) -> sqlite3.Connection:
@@ -117,7 +134,7 @@ def open_edinet_db_readonly(root: Path) -> sqlite3.Connection:
 
 def corroborate_map_proposal(
     edinet_conn: sqlite3.Connection,
-    final_rows_by_key: Dict[Tuple[str, str], List[float]],
+    final_rows_by_key: Dict[Tuple[str, str], List[FinalValue]],
     mapping_row: Dict[str, Any],
     observed_item_row: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -133,6 +150,7 @@ def corroborate_map_proposal(
     element_id = str(observed_item_row.get("element_id") or "")
     concept_id = str(mapping_row.get("concept_id") or "")
     normalized_scope = str(observed_item_row.get("normalized_scope") or "")
+    observed_unit = str(observed_item_row.get("unit") or "")
 
     scopes = SCOPE_TO_CONSOLIDATION_SCOPE.get(normalized_scope)
 
@@ -165,7 +183,7 @@ def corroborate_map_proposal(
         raw_value = row["value"] if isinstance(row, sqlite3.Row) else row[1]
         parsed = _parse_fact_value(raw_value)
         if parsed is not None:
-            fact_values_by_cy[str(cy)].add(round(parsed / 1_000_000, 6))
+            fact_values_by_cy[str(cy)].add(parsed)
 
     overlap = 0
     match = 0
@@ -174,22 +192,24 @@ def corroborate_map_proposal(
         if len(values) != 1:
             # 同一(company_year, element, scope)内で値が割れる = 曖昧なので突合対象外
             continue
-        element_value_myen = next(iter(values))
         final_values = final_rows_by_key.get((cy, concept_id))
         if not final_values or len(final_values) != 1:
             # 概念に既存値が無い、または複数値で一意化できない
             continue
-        concept_value_myen = final_values[0]
+        concept_value, concept_unit = final_values[0]
+        element_value = comparable_fact_value(next(iter(values)), observed_unit, concept_unit)
+        if element_value is None:
+            continue
         overlap += 1
-        tol = max(1.0, abs(concept_value_myen) * 0.001)
-        is_match = abs(concept_value_myen - element_value_myen) <= tol
+        is_match = values_match_for_unit(concept_value, element_value, concept_unit)
         if is_match:
             match += 1
         detail.append(
             {
                 "company_year_id": cy,
-                "element_value": element_value_myen,
-                "concept_value": concept_value_myen,
+                "element_value": element_value,
+                "concept_value": concept_value,
+                "unit": concept_unit,
                 "matched": is_match,
             }
         )

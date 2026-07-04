@@ -152,7 +152,7 @@ def _attach_corroboration(
                 value = mapping_promotion._parse_fact_value(r["value"])
                 if value is not None:
                     facts_by_elem[str(r["element_id"])].append(
-                        (str(r["company_year_id"]), str(r["consolidation_scope"]), round(value / 1_000_000, 6))
+                        (str(r["company_year_id"]), str(r["consolidation_scope"]), value)
                     )
     finally:
         edinet_conn.close()
@@ -161,11 +161,12 @@ def _attach_corroboration(
         observed_item = observed_items.get(str(row.get("observed_item_id") or ""), {})
         element_id = str(observed_item.get("element_id") or "")
         concept_id = str(row.get("concept_id") or "")
+        observed_unit = str(observed_item.get("unit") or "")
         scopes = mapping_promotion.SCOPE_TO_CONSOLIDATION_SCOPE.get(str(observed_item.get("normalized_scope") or ""))
         by_cy: Dict[str, set] = defaultdict(set)
-        for cy, scope, value_myen in facts_by_elem.get(element_id, []):
+        for cy, scope, raw_value in facts_by_elem.get(element_id, []):
             if scopes is None or scope in scopes:
-                by_cy[cy].add(value_myen)
+                by_cy[cy].add(raw_value)
         overlap = 0
         match = 0
         examples: List[Dict[str, Any]] = []
@@ -176,15 +177,17 @@ def _attach_corroboration(
             final_values = final_index.get((cy, concept_id))
             if not final_values or len(final_values) != 1:
                 continue
-            concept_value = final_values[0]
+            concept_value, concept_unit = final_values[0]
+            element_value = mapping_promotion.comparable_fact_value(next(iter(values)), observed_unit, concept_unit)
+            if element_value is None:
+                continue
             overlap += 1
-            tol = max(1.0, abs(concept_value) * 0.001)
-            is_match = abs(concept_value - element_value) <= tol
+            is_match = mapping_promotion.values_match_for_unit(concept_value, element_value, concept_unit)
             if is_match:
                 match += 1
             if len(examples) < 5:
                 examples.append(
-                    {"company_year_id": cy, "element_value": element_value, "concept_value": concept_value, "matched": is_match}
+                    {"company_year_id": cy, "element_value": element_value, "concept_value": concept_value, "unit": concept_unit, "matched": is_match}
                 )
         result = {"overlap_count": overlap, "match_count": match, "match_rate": (match / overlap) if overlap else 0.0}
         dtos[i]["corroboration"] = {**result, "verdict": _corroboration_verdict(result), "examples": examples}

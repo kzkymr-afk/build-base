@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -83,6 +85,37 @@ def _seed_mapping(
     )
 
 
+def _write_edinet_facts(root: Path, rows) -> None:
+    db_dir = root / "data" / "intermediate"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_dir / "edinet.db"))
+    conn.execute(
+        "create table xbrl_facts (company_year_id text, element_id text, consolidation_scope text, relative_year text, value text)"
+    )
+    for row in rows:
+        conn.execute(
+            "insert into xbrl_facts values (?, ?, ?, ?, ?)",
+            (
+                row["company_year_id"],
+                row["element_id"],
+                row.get("consolidation_scope", "連結"),
+                row.get("relative_year", "当期"),
+                str(row["value"]),
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _write_final_master_long(root: Path, rows) -> None:
+    out = root / "data" / "final" / "final_master_long.csv"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["company_year_id", "field_id", "value_normalized", "unit_normalized"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 class ReadMappingProposalsTests(unittest.TestCase):
     def test_returns_only_proposed_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -148,6 +181,30 @@ class ReadMappingProposalsTests(unittest.TestCase):
             self.assertEqual(result["total"], 1)
             self.assertEqual(result["proposals"][0]["mapping_id"], "cmap_det")
             self.assertEqual(result["proposals"][0]["rationale"], "matched_field_ids")
+
+    def test_percentage_corroboration_uses_point_tolerance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            conn = semantics_store.connect(root)
+            _seed_observed_item(conn, "xm_roe", "jppfs_cor:ReturnOnEquity", unit="%")
+            _seed_concept(conn, "roe", "ROE")
+            _seed_mapping(conn, "cmap_roe", observed_item_id="xm_roe", concept_id="roe")
+            conn.close()
+            _write_edinet_facts(
+                root,
+                [{"company_year_id": f"CO_{i}", "element_id": "jppfs_cor:ReturnOnEquity", "value": "8.2"} for i in range(4)],
+            )
+            _write_final_master_long(
+                root,
+                [{"company_year_id": f"CO_{i}", "field_id": "roe", "value_normalized": "8.6", "unit_normalized": "%"} for i in range(4)],
+            )
+
+            result = mapping_review.read_mapping_proposals(root)
+
+            corr = result["proposals"][0]["corroboration"]
+            self.assertEqual(corr["verdict"], "corroborated")
+            self.assertEqual(corr["match_count"], 4)
+            self.assertEqual(corr["examples"][0]["unit"], "%")
 
     def test_min_confidence_filters_ai_but_keeps_null_confidence_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

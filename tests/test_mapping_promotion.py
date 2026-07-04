@@ -127,6 +127,37 @@ class PromoteVerifiedMapProposalsTests(unittest.TestCase):
             self.assertTrue(row["decided_by"].startswith("ai:"))
             self.assertTrue(row["decided_by"].endswith("+corroboration"))
 
+    def test_percentage_map_uses_point_tolerance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            conn = semantics_store.connect(root)
+            _seed_observed_item(conn, "xm_roe", "jppfs_cor:ReturnOnEquity", unit="%")
+            _seed_ai_map_proposal(conn, "cmap_roe", "xm_roe", "roe")
+            conn.close()
+
+            _write_edinet_facts(
+                root,
+                [
+                    {"company_year_id": f"CO_{i}", "element_id": "jppfs_cor:ReturnOnEquity", "value": "8.2"}
+                    for i in range(4)
+                ],
+            )
+            _write_final_master_long(
+                root,
+                [
+                    {"company_year_id": f"CO_{i}", "field_id": "roe", "value_normalized": "8.6", "unit_normalized": "%"}
+                    for i in range(4)
+                ],
+            )
+
+            result = mapping_promotion.promote_verified_map_proposals(root, dry_run=False)
+
+            self.assertEqual(result["corroborated"], 1)
+            conn = semantics_store.connect(root)
+            row = conn.execute("select status from concept_mappings where mapping_id='cmap_roe'").fetchone()
+            conn.close()
+            self.assertEqual(row["status"], "confirmed")
+
     def test_mismatched_values_not_confirmed(self):
         """ケース1相当: 概念の既存値が比率(0.353)、観測要素は金額(億単位)で一致しない。"""
         with tempfile.TemporaryDirectory() as tmp:
@@ -593,7 +624,7 @@ class AdoptNewConceptsDuplicateResolutionTests(unittest.TestCase):
 
 
 class LoadFinalMasterLongIndexTests(unittest.TestCase):
-    def test_skips_non_million_yen_units(self):
+    def test_keeps_units_in_index(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _write_final_master_long(
@@ -604,8 +635,8 @@ class LoadFinalMasterLongIndexTests(unittest.TestCase):
                 ],
             )
             index = mapping_promotion.load_final_master_long_index(root)
-            self.assertNotIn(("CO_1", "roe"), index)
-            self.assertIn(("CO_1", "net_sales_consolidated"), index)
+            self.assertEqual(index[("CO_1", "roe")], [(8.5, "%")])
+            self.assertEqual(index[("CO_1", "net_sales_consolidated")], [(1000.0, "百万円")])
 
 
 if __name__ == "__main__":
