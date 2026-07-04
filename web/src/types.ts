@@ -223,6 +223,14 @@ export type CellDetail = {
   audit_rows: Row[];
   review_rows: Row[];
   resolved_rows: Row[];
+  source_chain: {
+    status: string;
+    fact_resolution: Row;
+    corroborations: Row[];
+    mappings: Row[];
+    observed_items: Row[];
+    review_decisions: Row[];
+  };
 };
 
 export type AlgorithmAuditResult = {

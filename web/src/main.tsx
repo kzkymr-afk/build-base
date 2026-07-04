@@ -358,8 +358,12 @@ function renderCellValue(column: string, value: unknown) {
     const status = String(value || '').trim();
     const ok = status === 'applied' || status === 'rejected';
     return <span className={`pill ${ok ? 'pill-ok' : 'pill-warn'}`}>{appliedStatusLabel(value)}</span>;
-  }  if (COLLAPSED_TEXT_COLUMNS.has(column)) {
+  }
+  if (COLLAPSED_TEXT_COLUMNS.has(column)) {
     return renderClampedText(value);
+  }
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return renderClampedText(JSON.stringify(value));
   }
   return String(value ?? '');
 }
@@ -1686,6 +1690,8 @@ function CellDetailPanel({
   const reviewColumns = ['extracted_value', 'review_reason', 'validation_status', 'confidence', 'source_quote'];
   const resolvedColumns = ['review_decision', 'corrected_value', 'applied_status', 'applied_value', 'applied_at', 'extracted_value', 'reviewer_note', 'reviewed_at'];
   const auditColumns = ['value', 'unit_normalized', 'data_scope', 'source_heading', 'source_quote', 'validation_status', 'confidence'];
+  const chain = detail.source_chain;
+  const factRows = chain?.fact_resolution && Object.keys(chain.fact_resolution).length ? [chain.fact_resolution] : [];
   const canOpenReview = detail.review_rows.length > 0 || detail.resolved_rows.length > 0;
   const displayValue = detail.is_blank ? '空欄' : detail.current_value;
 
@@ -1746,6 +1752,30 @@ function CellDetailPanel({
       <MiniRows title="レビュー候補" rows={detail.review_rows} columns={reviewColumns} emptyMessage="レビュー候補はありません。" />
       <MiniRows title="保存済みレビュー" rows={detail.resolved_rows} columns={resolvedColumns} emptyMessage="保存済みレビューはありません。" />
       <MiniRows title="根拠" rows={detail.audit_rows} columns={auditColumns} emptyMessage="source_audit.csv に該当行はありません。" />
+      <MiniRows
+        title="出典チェーン: fact"
+        rows={factRows}
+        columns={['value', 'resolution', 'corroboration_count', 'conflict_count', 'buckets', 'sources', 'decided_at_utc']}
+        emptyMessage="semantics のfact解決はありません。"
+      />
+      <MiniRows
+        title="出典チェーン: observed item"
+        rows={chain?.observed_items || []}
+        columns={['observed_item_id', 'item_kind', 'element_id', 'label_ja', 'normalized_scope', 'unit', 'source']}
+        emptyMessage="対応する observed_item はありません。"
+      />
+      <MiniRows
+        title="出典チェーン: mapping"
+        rows={chain?.mappings || []}
+        columns={['mapping_id', 'observed_item_id', 'concept_id', 'action', 'status', 'decided_by', 'confidence']}
+        emptyMessage="対応する concept_mapping はありません。"
+      />
+      <MiniRows
+        title="出典チェーン: corroboration"
+        rows={chain?.corroborations || []}
+        columns={['check_kind', 'check_ref', 'matched', 'primary_value', 'other_value', 'difference', 'restatement_suspected', 'detail']}
+        emptyMessage="照合証跡はありません。"
+      />
     </div>
   );
 }

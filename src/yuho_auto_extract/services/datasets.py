@@ -8,6 +8,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from yuho_auto_extract.io_utils import is_blankish, prefer_existing_table, read_table
 from yuho_auto_extract.services.algorithm_audit import read_algorithm_audit_manifest
+from yuho_auto_extract.services import semantics_store
 
 
 BASE_WIDE_COLUMNS = [
@@ -460,7 +461,98 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         "audit_rows": audit_rows[:20],
         "review_rows": review_rows[:20],
         "resolved_rows": resolved_rows[:20],
+        "source_chain": _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows),
     }
+
+
+def _read_semantics_source_chain(
+    root: Path,
+    company_year_id: str,
+    field_id: str,
+    resolved_rows: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    empty = {
+        "status": "not_built",
+        "fact_resolution": {},
+        "corroborations": [],
+        "mappings": [],
+        "observed_items": [],
+        "review_decisions": resolved_rows[:20],
+    }
+    if not semantics_store.semantics_db_path(root).exists():
+        return empty
+
+    conn = semantics_store.connect(root)
+    try:
+        fact = conn.execute(
+            "select * from cell_resolutions where company_year_id = ? and concept_id = ?",
+            (company_year_id, field_id),
+        ).fetchone()
+        corroborations = [
+            _decode_semantics_row(dict(row))
+            for row in conn.execute(
+                """
+                select * from corroborations
+                where company_year_id = ? and concept_id = ?
+                order by matched desc, check_kind, check_ref
+                limit 20
+                """,
+                (company_year_id, field_id),
+            )
+        ]
+        mappings = [
+            _decode_semantics_row(dict(row))
+            for row in conn.execute(
+                """
+                select * from concept_mappings
+                where concept_id = ?
+                order by
+                  case status when 'confirmed' then 0 when 'proposed' then 1 else 2 end,
+                  decided_by,
+                  mapping_id
+                limit 50
+                """,
+                (field_id,),
+            )
+        ]
+        observed_ids = [str(row.get("observed_item_id") or "") for row in mappings if row.get("observed_item_id")]
+        observed_items = []
+        if observed_ids:
+            placeholders = ",".join("?" for _ in observed_ids)
+            observed_items = [
+                _decode_semantics_row(dict(row))
+                for row in conn.execute(
+                    f"select * from observed_items where observed_item_id in ({placeholders}) order by item_kind, element_id",
+                    observed_ids,
+                )
+            ]
+        return {
+            "status": "ready",
+            "fact_resolution": _decode_semantics_row(dict(fact)) if fact is not None else {},
+            "corroborations": corroborations,
+            "mappings": mappings,
+            "observed_items": observed_items,
+            "review_decisions": resolved_rows[:20],
+        }
+    finally:
+        conn.close()
+
+
+def _decode_semantics_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    decoded = dict(row)
+    for key in ("buckets_json", "sources_json", "detail_json", "evidence_json", "sample_values_json"):
+        if key in decoded:
+            decoded[key.removesuffix("_json")] = _safe_json_loads(decoded.get(key))
+    return decoded
+
+
+def _safe_json_loads(value: Any) -> Any:
+    if value in (None, ""):
+        return [] if value == "" else {}
+    try:
+        return json.loads(str(value))
+    except json.JSONDecodeError:
+        return value
 
 
 def read_markdown(root: Path, rel_path: str) -> Dict[str, str]:

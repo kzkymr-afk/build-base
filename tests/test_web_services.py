@@ -7,7 +7,7 @@ from yuho_auto_extract.io_utils import read_table, write_table
 from yuho_auto_extract.review_queue import build_review_queue
 from yuho_auto_extract.services.ai_prompt import build_prompt
 from yuho_auto_extract.services.datasets import read_cell_detail, read_chart_data, read_options, read_review_queue, read_wide
-from yuho_auto_extract.services import pipeline
+from yuho_auto_extract.services import pipeline, semantics_store
 from yuho_auto_extract.services.reviews import (
     delete_resolved_reviews,
     mark_company_field_not_applicable,
@@ -723,6 +723,84 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(detail["status"], "document_failed")
             self.assertEqual(detail["failure_reason"], "target_document_not_found")
             self.assertIn("docID", detail["next_action"])
+
+    def test_cell_detail_includes_semantics_source_chain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024", "fiscal_year": "2024", "roe": "8.2"}])
+            conn = semantics_store.connect(root)
+            try:
+                semantics_store.replace_cell_resolutions(
+                    conn,
+                    [
+                        {
+                            "company_year_id": "A_2024",
+                            "concept_id": "roe",
+                            "value": 8.2,
+                            "resolution": "auto_confirmed",
+                            "buckets": ["xbrl"],
+                            "sources": ["xbrl_vs_local:test"],
+                        }
+                    ],
+                    run_id="run1",
+                )
+                semantics_store.replace_corroborations(
+                    conn,
+                    [
+                        {
+                            "company_year_id": "A_2024",
+                            "field_id": "roe",
+                            "check_kind": "xbrl_vs_local",
+                            "check_ref": "test",
+                            "matched": True,
+                            "primary_value": 8.2,
+                            "other_value": 8.2,
+                            "difference": 0.0,
+                            "restatement_suspected": False,
+                            "detail": {"unit_normalized": "%"},
+                        }
+                    ],
+                    run_id="run1",
+                )
+                semantics_store.replace_observed_items(
+                    conn,
+                    [
+                        {
+                            "observed_item_id": "xm_roe",
+                            "item_kind": "xbrl",
+                            "element_id": "jppfs_cor:ROE",
+                            "label_ja": "自己資本利益率",
+                            "unit": "%",
+                            "source": "metric_catalog",
+                        }
+                    ],
+                )
+                semantics_store.replace_concept_mappings(
+                    conn,
+                    [
+                        {
+                            "mapping_id": "cmap_roe",
+                            "observed_item_id": "xm_roe",
+                            "concept_id": "roe",
+                            "action": "map",
+                            "status": "confirmed",
+                            "decided_by": "human:test",
+                        }
+                    ],
+                )
+            finally:
+                conn.close()
+
+            detail = read_cell_detail(root, "A_2024", "roe")
+
+            chain = detail["source_chain"]
+            self.assertEqual(chain["status"], "ready")
+            self.assertEqual(chain["fact_resolution"]["resolution"], "auto_confirmed")
+            self.assertEqual(chain["fact_resolution"]["sources"], ["xbrl_vs_local:test"])
+            self.assertEqual(chain["corroborations"][0]["detail"]["unit_normalized"], "%")
+            self.assertEqual(chain["mappings"][0]["mapping_id"], "cmap_roe")
+            self.assertEqual(chain["observed_items"][0]["observed_item_id"], "xm_roe")
 
     def test_review_queue_active_filter_hides_applied_saved_reviews(self):
         with tempfile.TemporaryDirectory() as tmp:
