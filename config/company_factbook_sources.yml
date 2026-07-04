@@ -116,6 +116,7 @@ common_use_categories:
 document_source_defaults:
   enabled: true
   parser: link_index
+  parse_documents: true
   follow_links: true
   max_follow_links: 10
   source_doc_type: factbook_or_ir_data

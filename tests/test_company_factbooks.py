@@ -52,6 +52,23 @@ class CompanyFactbookTests(unittest.TestCase):
             self.assertEqual(documents[0]["file_ext"], "pdf")
             self.assertEqual(documents[0]["parser_status"], "pending_parser")
 
+    def test_refresh_parses_downloaded_factbook_document_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(root, parser="link_index_parse_documents")
+
+            result = company_factbooks.refresh_company_factbooks(root, fetcher=_fake_fetcher)
+
+            self.assertEqual(result["status"], "succeeded")
+            self.assertEqual(result["new_order_rows"], 2)
+            rows = read_table(root / "data" / "marts" / "company_factbooks" / "building_orders_by_category.csv")
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["source_metric_id"], "building_orders_by_use")
+            self.assertEqual(rows[0]["use_category_normalized"], "factory")
+            self.assertEqual(rows[0]["amount_million_yen"], "12000")
+            documents = read_table(root / "data" / "marts" / "company_factbooks" / "source_documents.csv")
+            self.assertEqual(documents[0]["parser_status"], "parsed")
+
     def test_refresh_keeps_source_page_when_index_has_no_documents(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -189,11 +206,14 @@ class CompanyFactbookTests(unittest.TestCase):
             self.assertEqual(result["incomplete_rows"], 1)
             self.assertEqual(result["status_counts"]["pass"], 1)
             self.assertEqual(result["status_counts"]["no_mapping"], 1)
+            self.assertEqual(result["pending_rows"], 1)
             rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.csv")
             json_rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.json")
+            pending_rows = read_table(root / "data" / "reports" / "company_factbook_pending_rows.csv")
             self.assertEqual(rows[0]["validation_status"], "pass")
             self.assertEqual(rows[1]["validation_status"], "no_mapping")
             self.assertEqual(len(json_rows), 2)
+            self.assertEqual(len(pending_rows), 1)
 
 
 def _write_config(root: Path, parser: str) -> None:
@@ -254,6 +274,24 @@ def _write_config(root: Path, parser: str) -> None:
                 "source_page_url": "https://example.com/empty.html",
                 "link_text_includes": ["決算説明"],
                 "href_includes": [".pdf"],
+            }
+        )
+    elif parser == "link_index_parse_documents":
+        sources.append(
+            {
+                "id": "test_index_parse",
+                "company_id": "TEST",
+                "company_name": "テスト建設",
+                "enabled": True,
+                "parser": "link_index",
+                "parse_documents": True,
+                "source_doc_type": "factbook",
+                "source_dataset_id": "test_factbook_document",
+                "source_metric_id": "building_use_metrics",
+                "category_type": "use",
+                "source_page_url": "https://example.com/factbook-index.html",
+                "href_includes": [".csv"],
+                "unit": "億円",
             }
         )
     company_document_sources = []
@@ -322,6 +360,10 @@ def _fake_fetcher(url: str, cfg: dict) -> str:
             },
             ensure_ascii=False,
         )
+    if url.endswith("factbook-index.html"):
+        return '<h2>2025年3月期 ファクトブック</h2><a href="/factbook-orders-2025.csv">用途別受注高CSV</a>'
+    if url.endswith("factbook-orders-2025.csv"):
+        return "用途,2025年3月期\n工場,120\n医療施設,45\n"
     if url.endswith("index.html"):
         return '<h2>2026年3月期</h2><a href="/orders-2026.pdf">第4四半期</a>'
     if url.endswith("empty.html"):

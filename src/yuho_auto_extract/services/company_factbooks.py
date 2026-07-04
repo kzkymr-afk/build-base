@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from yuho_auto_extract.io_utils import is_blankish, read_table, read_yaml, write_table
 from yuho_auto_extract.services.automation import merge_records_by_key
 from yuho_auto_extract.services.datasets import paginate
+from yuho_auto_extract.services import factbook_parsers
 
 
 FetchText = Callable[[str, Dict[str, Any]], str]
@@ -366,6 +367,10 @@ def refresh_company_factbooks(
             if log:
                 log(f"[company-factbooks] source {source.get('id', '')} parser={parser}")
             parsed_orders, parsed_documents, warnings = _parse_source(root, cfg, source, raw_dir, fetch, fetched_at)
+            if _bool(source.get("parse_documents"), False):
+                document_orders, parsed_documents, document_warnings = _parse_candidate_documents(root, cfg, source, raw_dir, parsed_documents, fetcher, fetched_at)
+                parsed_orders.extend(document_orders)
+                warnings.extend(document_warnings)
             order_rows.extend(parsed_orders)
             source_documents.extend(parsed_documents)
             summary["parser_warnings"].extend(warnings)
@@ -450,6 +455,10 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
     validation_output_rows = _validation_columns(validation_rows)
     write_table(output, validation_output_rows)
     json_output = _write_json_sidecar(output, validation_output_rows)
+    pending_rows = [row for row in validation_output_rows if str(row.get("validation_status") or "") not in {"pass", "forecast_not_checked"}]
+    pending_path = root / "data" / "reports" / "company_factbook_pending_rows.csv"
+    write_table(pending_path, pending_rows)
+    pending_json_path = _write_json_sidecar(pending_path, pending_rows)
     counts: Dict[str, int] = {}
     for row in validation_rows:
         status = str(row.get("validation_status") or "")
@@ -474,6 +483,9 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
         "status_counts": counts,
         "output_path": str(output),
         "json_output_path": str(json_output),
+        "pending_rows": len(pending_rows),
+        "pending_output_path": str(pending_path),
+        "pending_json_output_path": str(pending_json_path),
         "wide_path": str(wide_path),
         "absolute_tolerance_million_yen": tolerance_abs,
         "relative_tolerance": tolerance_pct,
@@ -686,6 +698,63 @@ def _parse_link_index(source: Dict[str, Any], raw_dir: Path, fetch: FetchText, f
             )
         )
     return _dedupe_documents(docs)
+
+
+def _parse_candidate_documents(
+    root: Path,
+    cfg: Dict[str, Any],
+    source: Dict[str, Any],
+    raw_dir: Path,
+    documents: List[Dict[str, Any]],
+    text_fetcher: Optional[FetchText],
+    fetched_at: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    rows: List[Dict[str, Any]] = []
+    warnings: List[str] = []
+    parsed_documents: List[Dict[str, Any]] = []
+    source_dir = raw_dir / _safe_name(str(source.get("id") or "source"))
+    source_dir.mkdir(parents=True, exist_ok=True)
+    for index, document in enumerate(documents, start=1):
+        ext = str(document.get("file_ext") or "").lower().lstrip(".")
+        if ext not in {"pdf", "xlsx", "xlsm", "xltx", "xltm", "csv"}:
+            parsed_documents.append(document)
+            continue
+        url = str(document.get("url") or "")
+        if not url:
+            parsed_documents.append(document)
+            continue
+        try:
+            filename = _safe_name(str(document.get("file_name") or Path(urlparse(url).path).name or f"document_{index}.{ext}"))
+            if not Path(filename).suffix:
+                filename = f"{filename}.{ext}"
+            path = source_dir / filename
+            path.write_bytes(_fetch_document_bytes(url, source, text_fetcher))
+            parser_source = {
+                **source,
+                **document,
+                "source_url": url,
+                "url": url,
+                "source_page_url": source.get("source_page_url", ""),
+                "source_metric_id": document.get("source_metric_id") or source.get("source_metric_id", ""),
+                "category_type": document.get("category_type") or source.get("category_type", ""),
+                "period_type": document.get("period_type") or "annual",
+                "period_label": document.get("period_label") or source.get("period_label", ""),
+                "fiscal_year": document.get("fiscal_year") or source.get("fiscal_year", ""),
+            }
+            parsed_rows, parser_warnings = factbook_parsers.parse_document(path, parser_source, cfg, fetched_at)
+            rows.extend(parsed_rows)
+            warnings.extend(parser_warnings)
+            parsed_documents.append(
+                {
+                    **document,
+                    "parser_status": "parsed" if parsed_rows else "pending_parser",
+                    "note": _append_note(document.get("note", ""), "機械抽出済み" if parsed_rows else "機械抽出では用途別数値を確定できませんでした"),
+                }
+            )
+        except Exception as exc:
+            warnings.append(f"document parse failed source={source.get('id', '')} url={url}: {exc}")
+            parsed_documents.append({**document, "parser_status": "pending_parser", "note": _append_note(document.get("note", ""), f"document parse failed: {exc}")})
+    return rows, parsed_documents, warnings
 
 
 def _extract_link_documents(source: Dict[str, Any], url: str, html: str, fetched_at: str) -> List[Dict[str, Any]]:
@@ -1263,6 +1332,26 @@ def _fetch_text(url: str, cfg: Dict[str, Any]) -> str:
     raise RuntimeError(f"request failed for {url}: {last_error}")
 
 
+def _fetch_document_bytes(url: str, cfg: Dict[str, Any], text_fetcher: Optional[FetchText] = None) -> bytes:
+    if text_fetcher is not None:
+        return text_fetcher(url, cfg).encode("utf-8")
+    headers = {"User-Agent": str(cfg.get("user_agent") or "Mozilla/5.0 BuildBase/company-factbooks")}
+    timeout = int(cfg.get("request_timeout_seconds") or 30)
+    retry_count = int(cfg.get("retry_count") or 2)
+    backoff = float(cfg.get("retry_backoff_seconds") or 2)
+    last_error: Optional[Exception] = None
+    for attempt in range(retry_count + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout)
+            response.raise_for_status()
+            return response.content
+        except Exception as exc:
+            last_error = exc
+            if attempt < retry_count:
+                time.sleep(backoff * (attempt + 1))
+    raise RuntimeError(f"document request failed for {url}: {last_error}")
+
+
 def _factbook_config(root: Path) -> Dict[str, Any]:
     path = root / "config" / "company_factbook_sources.yml"
     if not path.exists():
@@ -1370,6 +1459,11 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 def _read_optional(path: Path) -> List[Dict[str, Any]]:
     return read_table(path) if path.exists() else []
+
+
+def _append_note(note: Any, addition: str) -> str:
+    base = str(note or "").strip()
+    return f"{base} {addition}".strip() if base else addition
 
 
 def _companies_from_master(root: Path) -> Dict[str, Dict[str, str]]:
