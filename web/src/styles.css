@@ -1,4 +1,38 @@
-:root {
+:root,
+html[data-theme='dark'] {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface-soft: #1c2129;
+  --surface-strong: #21262d;
+  --border: #30363d;
+  --border-strong: #444c56;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --muted-strong: #b1bac4;
+  --primary: #2f81f7;
+  --primary-hover: #1f6feb;
+  --primary-soft: #12233d;
+  --accent: #e3b341;
+  --accent-soft: #2d2410;
+  --danger: #f85149;
+  --danger-soft: #2d1516;
+  --success: #3fb950;
+  --success-soft: #12261e;
+  --warning: #d29922;
+  --warning-soft: #272115;
+  --sidebar: #010409;
+  --sidebar-2: #0d1117;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 12px 28px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  background: var(--bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+html[data-theme='light'] {
   --bg: #f6f8fb;
   --surface: #ffffff;
   --surface-soft: #f9fbfd;
@@ -24,11 +58,6 @@
   --shadow-sm: 0 1px 2px rgba(25, 33, 41, 0.06);
   --shadow-md: 0 12px 28px rgba(25, 33, 41, 0.08);
   --shadow-lg: 0 18px 44px rgba(25, 33, 41, 0.11);
-  color: var(--text);
-  background: var(--bg);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 15px;
-  letter-spacing: 0;
 }
 
 * {
@@ -47,7 +76,7 @@ body,
 body {
   margin: 0;
   background:
-    linear-gradient(180deg, #f8fbfd 0%, var(--bg) 360px),
+    linear-gradient(180deg, var(--surface-soft) 0%, var(--bg) 360px),
     var(--bg);
 }
 
@@ -133,7 +162,7 @@ textarea {
   color: var(--text);
   min-height: 38px;
   padding: 8px 11px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
@@ -261,6 +290,18 @@ nav button:hover:not(:disabled) {
   padding: 5px 7px;
   pointer-events: none;
   box-shadow: var(--shadow-sm);
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.theme-toggle {
+  min-width: 72px;
 }
 
 .dot {

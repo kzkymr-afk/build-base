@@ -414,6 +414,10 @@ function useFactbookOptions() {
 
 function App() {
   const [tab, setTab] = React.useState<(typeof tabs)[number][0]>('run');
+  const [theme, setTheme] = React.useState<'dark' | 'light'>(() => {
+    const saved = window.localStorage.getItem('buildbase-theme');
+    return saved === 'light' ? 'light' : 'dark';
+  });
   const [status, setStatus] = React.useState<Status | null>(null);
   const [job, setJob] = React.useState<Job | null>(null);
   const [dataRefreshToken, setDataRefreshToken] = React.useState(0);
@@ -421,6 +425,11 @@ function App() {
   const [auditTarget, setAuditTarget] = React.useState<{ company_year_id: string; field_id: string } | null>(null);
   const [reviewTarget, setReviewTarget] = React.useState<ReviewTarget | null>(null);
   const completedJobRef = React.useRef('');
+
+  React.useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('buildbase-theme', theme);
+  }, [theme]);
 
   const refreshStatus = React.useCallback(() => {
     api<Status>('/api/status').then(setStatus).catch((err) => setError(String(err)));
@@ -478,9 +487,14 @@ function App() {
             <h1>{tabs.find(([key]) => key === tab)?.[1]}</h1>
             <p>{status?.project_root || 'プロジェクト状態を読み込み中'}</p>
           </div>
-          <button className="ghost" onClick={() => { refreshStatus(); refreshJob(); }}>
-            全体再読込
-          </button>
+          <div className="topbar-actions">
+            <button className="ghost theme-toggle" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? 'Light' : 'Dark'}
+            </button>
+            <button className="ghost" onClick={() => { refreshStatus(); refreshJob(); }}>
+              全体再読込
+            </button>
+          </div>
         </header>
         {error && (
           <div className="alert">
