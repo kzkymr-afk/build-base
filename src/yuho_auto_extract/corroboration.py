@@ -270,6 +270,7 @@ def corroborate_next_year_prior(
             matched = _is_matched(
                 diff, cur_val, prior_val, NEXT_YEAR_PRIOR_TOLERANCE_ABS_YEN, NEXT_YEAR_PRIOR_TOLERANCE_PCT
             )
+            restatement_mismatch = not matched
             results.append(
                 build_corroboration_record(
                     company_year_id=company_year_id,
@@ -280,13 +281,14 @@ def corroborate_next_year_prior(
                     primary_value=cur_val,
                     other_value=prior_val,
                     difference=diff,
-                    restatement_suspected=restatement_suspected and not matched,
+                    restatement_suspected=restatement_mismatch,
                     detail={
                         "next_company_year_id": next_company_year_id,
                         "context_suffix": cur_suffix,
                         "consolidation_scope": cur_scope,
                         "period_or_instant": cur_period,
                         "unit": "円",
+                        "transition_year_related": restatement_suspected,
                     },
                 )
             )

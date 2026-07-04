@@ -181,7 +181,7 @@ class CorroborateNextYearPriorTests(unittest.TestCase):
         self.assertEqual(records[0]["check_kind"], "next_year_prior")
         self.assertFalse(records[0]["restatement_suspected"])
 
-    def test_mismatched_values_without_transition_flag_are_conflicts(self):
+    def test_mismatched_values_without_transition_flag_are_restatement_suspected(self):
         current_facts = [
             {
                 "company_year_id": "A_2023",
@@ -214,7 +214,8 @@ class CorroborateNextYearPriorTests(unittest.TestCase):
         )
         self.assertEqual(len(records), 1)
         self.assertFalse(records[0]["matched"])
-        self.assertFalse(records[0]["restatement_suspected"])
+        self.assertTrue(records[0]["restatement_suspected"])
+        self.assertFalse(records[0]["detail"]["transition_year_related"])
 
     def test_mismatched_values_with_transition_flag_are_flagged_not_conflicted(self):
         current_facts = [
