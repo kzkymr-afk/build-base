@@ -51,16 +51,20 @@ def resolve_target_documents(
     company_year_master: Iterable[Dict[str, Any]],
     document_filter: Dict[str, Any],
     fiscal_years: Optional[Iterable[int]] = None,
+    period_type: str = "annual",
 ) -> List[Dict[str, Any]]:
     docs = list(document_index)
     requested_years = set(int(year) for year in fiscal_years) if fiscal_years else None
+    requested_period = str(period_type or "annual")
     companies = {str(row["operating_company_id"]): row for row in company_master}
     outputs: List[Dict[str, Any]] = []
     for company_year in company_year_master:
         company_year_id = str(company_year["company_year_id"])
         fiscal_year = int(company_year["fiscal_year"])
-        period_type = str(company_year.get("period_type") or "annual")
-        report_cfg = document_filter_for_period(document_filter, period_type)
+        row_period_type = str(company_year.get("period_type") or "annual")
+        if requested_period != "all" and row_period_type != requested_period:
+            continue
+        report_cfg = document_filter_for_period(document_filter, row_period_type)
         if requested_years and fiscal_year not in requested_years:
             continue
         company = companies.get(str(company_year["operating_company_id"]))
@@ -88,7 +92,7 @@ def resolve_target_documents(
                 "operating_company_name": company.get("operating_company_name"),
                 "fiscal_year": fiscal_year,
                 "fiscal_year_end": company_year.get("fiscal_year_end"),
-                "period_type": period_type,
+                "period_type": row_period_type,
                 "reporting_entity_id": reporting_entity_id,
                 "reporting_entity_name": reporting_company.get("operating_company_name"),
                 "reporting_entity_edinet_code": reporting_company.get("edinet_code"),

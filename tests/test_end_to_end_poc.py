@@ -1,6 +1,6 @@
 import unittest
 
-from yuho_auto_extract.exporter import apply_review_decisions, filter_exportable_rows
+from yuho_auto_extract.exporter import apply_review_decisions, build_wide_values, filter_exportable_rows
 from yuho_auto_extract.normalizer import normalize_extraction
 from yuho_auto_extract.review_queue import build_review_queue
 from yuho_auto_extract.validator import attach_validation_status, validate_records
@@ -42,6 +42,30 @@ class EndToEndPocContractTests(unittest.TestCase):
         final = apply_review_decisions(rows, [])
         self.assertEqual(final[0]["review_status"], "unreviewed")
         self.assertEqual(filter_exportable_rows(final), [])
+
+    def test_wide_values_prefers_field_preferred_method_when_multiple_sources_agree(self):
+        rows = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "rd_expense",
+                "value": 22207,
+                "extraction_method": "XBRL_CSV",
+                "review_status": "auto_accepted",
+            },
+            {
+                "company_year_id": "A_2024",
+                "field_id": "rd_expense",
+                "value": 22200,
+                "extraction_method": "LOCAL_RULE_TABLE",
+                "review_status": "auto_accepted",
+            },
+        ]
+        wide = build_wide_values(
+            rows,
+            [{"company_year_id": "A_2024"}],
+            [{"field_id": "rd_expense", "preferred_method": "XBRL_CSV"}],
+        )
+        self.assertEqual(wide[0]["rd_expense"], 22207)
 
 
 if __name__ == "__main__":

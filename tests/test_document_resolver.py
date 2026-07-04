@@ -140,10 +140,58 @@ class DocumentResolverTests(unittest.TestCase):
                 "prefer_latest_correction": True,
             },
         }
-        targets = resolve_target_documents(docs, companies, company_years, filter_cfg)
+        targets = resolve_target_documents(docs, companies, company_years, filter_cfg, period_type="semiannual_h1")
         self.assertEqual(targets[0]["docID"], "H1C")
         self.assertEqual(targets[0]["period_type"], "semiannual_h1")
         self.assertTrue(targets[0]["is_correction"])
+
+    def test_default_resolve_filters_to_annual_rows(self):
+        docs = [
+            {
+                "docID": "A1",
+                "edinetCode": "E1",
+                "ordinanceCode": "010",
+                "formCode": "030000",
+                "docDescription": "有価証券報告書",
+                "periodEnd": "2025-03-31",
+                "submitDateTime": "2025-06-01 10:00",
+            },
+            {
+                "docID": "H1",
+                "edinetCode": "E1",
+                "ordinanceCode": "010",
+                "formCode": "043A00",
+                "docDescription": "半期報告書",
+                "periodEnd": "2025-03-31",
+                "submitDateTime": "2024-11-10 10:00",
+            },
+        ]
+        companies = [{"operating_company_id": "A", "operating_company_name": "A社", "edinet_code": "E1", "fiscal_year_end_month": 3}]
+        company_years = [
+            {"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": 2024, "fiscal_year_end": "2025-03-31", "period_type": "annual"},
+            {"company_year_id": "A_2024H1", "operating_company_id": "A", "fiscal_year": 2024, "fiscal_year_end": "2025-03-31", "period_type": "semiannual_h1"},
+        ]
+        filter_cfg = {
+            "securities_report": {
+                "doc_description_include": ["有価証券報告書"],
+                "doc_description_exclude": ["四半期", "半期"],
+                "ordinance_code_candidates": ["010"],
+                "form_code_candidates": ["030000"],
+            },
+            "semiannual_report": {
+                "doc_description_include": ["半期報告書"],
+                "doc_description_exclude": ["四半期"],
+                "ordinance_code_candidates": ["010"],
+                "form_code_candidates": ["043A00"],
+            },
+        }
+        targets = resolve_target_documents(docs, companies, company_years, filter_cfg)
+        self.assertEqual([row["company_year_id"] for row in targets], ["A_2024"])
+        self.assertEqual(targets[0]["docID"], "A1")
+
+        semiannual = resolve_target_documents(docs, companies, company_years, filter_cfg, period_type="semiannual_h1")
+        self.assertEqual([row["company_year_id"] for row in semiannual], ["A_2024H1"])
+        self.assertEqual(semiannual[0]["docID"], "H1")
 
 
 if __name__ == "__main__":

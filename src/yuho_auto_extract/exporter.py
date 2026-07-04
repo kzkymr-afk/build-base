@@ -78,25 +78,58 @@ def build_wide_values(
     company_year_master: Iterable[Dict[str, Any]],
     field_definition: Optional[Iterable[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
+    fields = list(field_definition or [])
+    preferred_methods = {
+        str(field.get("field_id") or ""): str(field.get("preferred_method") or "")
+        for field in fields
+        if field.get("field_id")
+    }
     base = {str(row["company_year_id"]): dict(row) for row in company_year_master}
     for row in base.values():
-        for field in field_definition or []:
+        for field in fields:
             field_id = str(field.get("field_id") or "")
             if field_id:
                 row.setdefault(field_id, "")
+    selected_scores: Dict[Tuple[str, str], Tuple[int, int, int]] = {}
     for row in rows:
         company_year_id = str(row.get("company_year_id", ""))
         if company_year_id not in base:
             base[company_year_id] = {"company_year_id": company_year_id}
-            for field in field_definition or []:
+            for field in fields:
                 field_id = str(field.get("field_id") or "")
                 if field_id:
                     base[company_year_id].setdefault(field_id, "")
         value = row.get("value", row.get("value_normalized"))
         if is_blankish(value):
             continue
-        base[company_year_id][str(row.get("field_id"))] = value
+        field_id = str(row.get("field_id"))
+        key = (company_year_id, field_id)
+        score = _wide_value_score(row, preferred_methods.get(field_id, ""))
+        if score < selected_scores.get(key, (-1, -1, -1)):
+            continue
+        selected_scores[key] = score
+        base[company_year_id][field_id] = value
     return [base[key] for key in sorted(base.keys())]
+
+
+def _wide_value_score(row: Dict[str, Any], preferred_method: str) -> Tuple[int, int, int]:
+    review_status = str(row.get("review_status") or "").lower()
+    review_score = {
+        "corrected": 4,
+        "approved": 3,
+        "auto_accepted": 2,
+        "unreviewed": 1,
+    }.get(review_status, 0)
+    extraction_method = str(row.get("extraction_method") or "")
+    preferred_score = 1 if preferred_method and extraction_method == preferred_method else 0
+    source_score = {
+        "XBRL_CSV": 5,
+        "XBRL_SEGMENT_CONTEXT": 4,
+        "XBRL_COST_TEXTBLOCK": 3,
+        "LOCAL_RULE_TABLE": 2,
+        "MANUAL_OBSIDIAN": 1,
+    }.get(extraction_method, 0)
+    return (review_score, preferred_score, source_score)
 
 
 def build_source_audit(

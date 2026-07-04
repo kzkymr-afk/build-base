@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("resolve")
     p.add_argument("--fiscal-years", nargs="*", type=int)
+    p.add_argument("--period-type", choices=["annual", "semiannual_h1", "all"], default="annual")
     p.set_defaults(handler=cmd_resolve)
 
     p = sub.add_parser("download")
@@ -226,6 +227,7 @@ def cmd_resolve(root: Path, args: argparse.Namespace) -> int:
         cfg.company_year_master,
         cfg.document_filter,
         fiscal_years=args.fiscal_years,
+        period_type=args.period_type,
     )
     written = write_table(root / "data" / "intermediate" / "target_documents.parquet", targets)
     print(f"wrote {written} rows={len(targets)}")

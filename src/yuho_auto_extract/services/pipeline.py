@@ -124,7 +124,7 @@ def annual_refresh(
     previous_targets = _read_existing(root / "data" / "intermediate" / "target_documents.parquet")
     previous_manifest = _read_existing(root / "data" / "raw" / "download_manifest.parquet")
 
-    year_args = argparse.Namespace(fiscal_years=[int(target_fiscal_year)])
+    year_args = argparse.Namespace(fiscal_years=[int(target_fiscal_year)], period_type="annual")
     for name, func, args in [
         ("index-annual", cli.cmd_index_annual, year_args),
         ("resolve", cli.cmd_resolve, year_args),
