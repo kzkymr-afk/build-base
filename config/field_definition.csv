@@ -2,15 +2,15 @@ field_id,field_name_ja,category,target_unit,data_scope_required,period_type,pref
 operating_income_consolidated,営業利益_連結,performance,百万円,consolidated,current_year,XBRL_CSV,OperatingIncome;ProfitLossFromOperatingActivities,CurrentYearDuration;ConsolidatedMember,,,,,0.95,IFRS/日本基準でタグ差異あり
 ordinary_income_consolidated,経常利益_連結,performance,百万円,consolidated,current_year,XBRL_CSV,OrdinaryIncome,CurrentYearDuration;ConsolidatedMember,,,,,0.95,日本基準中心
 roe,ROE,performance,%,consolidated,current_year,XBRL_CSV,RateOfReturnOnEquitySummaryOfBusinessResults;RateOfReturnOnEquity;自己資本利益率,CurrentYearDuration;ConsolidatedMember,,,,,0.90,
-building_orders_total,建築受注高_合計,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築,建築工事;建築事業,,sum_building_orders;yoy_anomaly,0.85,
-building_orders_private,建築受注高_民間,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;民間,民間工事,,sum_building_orders,0.85,
-building_orders_government,建築受注高_官庁,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;官庁,官公庁;公共,,sum_building_orders,0.85,
-building_orders_overseas,建築受注高_海外,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;海外,海外工事,,sum_building_orders,0.85,
-completed_building,完成工事高_建築,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;建築,完成高;売上高,,backlog_equation;yoy_anomaly,0.85,
+building_orders_total,建築受注高_合計,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;完成工事高;繰越高;工事受注高;・緊密な業務連携と効率的な組織運営を目的に;土木・建築部門の本社機能等を再配置;連結売上高は;主に当社における完成工事高が増加したことにより;前連結会計年度比17.2％増の4;926億円となった。;建築事業;(建築);海外受注高　（現地法人含む）　 　1;000億円;２．国内建築事業戦略;・建設事業の競争力・収益力の強化…………国内土木;国内建築;海外の事業３本柱の競争力・収益力の強化;売上高　　　　　　 　　　　　　　5;6;000億円 程度,建築工事;建築事業;建築受注高_合計;建築;土木;官庁;民間;海外;受注工事高,,sum_building_orders;yoy_anomaly,0.85,
+building_orders_private,建築受注高_民間,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;民間;海外受注高　（現地法人含む）　 　1;000億円;完成工事高;繰越高;工事受注高;建設事業における受注工事高及び完成工事高の実績;建設事業における受注工事高及び完成工事高の状況,民間工事;建築受注高_民間;建築;土木;官庁;民間;海外;受注工事高,,sum_building_orders,0.85,
+building_orders_government,建築受注高_官庁,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;官庁;海外受注高　（現地法人含む）　 　1;000億円;完成工事高;繰越高;工事受注高;建設事業における受注工事高及び完成工事高の実績;建設事業における受注工事高及び完成工事高の状況;・建設事業の競争力・収益力の強化…………国内土木;国内建築;海外の事業３本柱の競争力・収益力の強化;売上高　　　　　　 　　　　　　　5,官公庁;公共;建築受注高_官庁;建築;土木;官庁;民間;海外;受注工事高,,sum_building_orders,0.85,
+building_orders_overseas,建築受注高_海外,orders,百万円,standalone,current_year,LOCAL_TABLE,,,受注高;建築;海外;海外受注高　（現地法人含む）　 　1;000億円;完成工事高;繰越高;工事受注高;建設事業における受注工事高及び完成工事高の実績;建設事業における受注工事高及び完成工事高の状況;・建設事業の競争力・収益力の強化…………国内土木;国内建築;海外の事業３本柱の競争力・収益力の強化,海外工事;建築受注高_海外;建築;土木;官庁;民間;海外;受注工事高,,sum_building_orders,0.85,
+completed_building,完成工事高_建築,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;建築;受注高;繰越高;工事受注高;海外受注高　（現地法人含む）　 　1;000億円;建設事業における受注工事高及び完成工事高の実績;２．国内建築事業戦略;売上高　　　　　　 　　　　　　　5,完成高;売上高;完成工事高_建築;建築;土木;官庁;民間;海外;受注工事高,,backlog_equation;yoy_anomaly,0.85,
 completed_building_government,完成工事高_建築_官庁,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;建築;官庁,官公庁;公共,,,0.85,
 completed_building_private,完成工事高_建築_民間,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;建築;民間,民間工事,,,0.85,
 completed_building_overseas,完成工事高_建築_海外,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;建築;海外,海外工事,,,0.85,
-backlog_building_next,次期繰越高_建築,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;建築,次期繰越工事高,,backlog_equation;yoy_anomaly,0.85,
+backlog_building_next,次期繰越高_建築,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;建築;完成工事高;受注高;工事受注高;海外受注高　（現地法人含む）　 　1;000億円;建設事業における受注工事高及び完成工事高の実績;２．国内建築事業戦略;・建設事業の競争力・収益力の強化…………国内土木;国内建築;海外の事業３本柱の競争力・収益力の強化;売上高　　　　　　 　　　　　　　5,次期繰越工事高;次期繰越高_建築;建築;土木;官庁;民間;海外;受注工事高,,backlog_equation;yoy_anomaly,0.85,
 backlog_building_government,次期繰越高_建築_官庁,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;建築;官庁,官公庁;公共,,,0.85,
 backlog_building_private,次期繰越高_建築_民間,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;建築;民間,民間工事,,,0.85,
 backlog_building_overseas,次期繰越高_建築_海外,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;建築;海外,海外工事,,,0.85,
@@ -18,7 +18,7 @@ domestic_building_orders_total,国内建築受注高_合計,orders,百万円,sta
 domestic_completed_building,完成工事高_国内建築,orders,百万円,standalone,current_year,LOCAL_TABLE,,,完成工事高;国内建築,国内建築;国内建築事業,,yoy_anomaly,0.85,海外建設が別行の会社向け
 domestic_backlog_building_next,次期繰越高_国内建築,orders,百万円,standalone,period_end,LOCAL_TABLE,,,繰越高;国内建築,国内建築;国内建築事業,,yoy_anomaly,0.85,海外建設が別行の会社向け
 segment_orders_building,セグメント受注高_建築,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;建築事業,建築部門,,,0.80,連結/セグメント受注。単独建築受注とは混ぜない
-segment_orders_civil,セグメント受注高_土木,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;土木事業,土木部門,,,0.80,連結/セグメント受注。単独土木とは混ぜない
+segment_orders_civil,セグメント受注高_土木,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;土木事業,土木部門;セグメント受注高_土木,,,0.80,連結/セグメント受注。単独土木とは混ぜない
 segment_orders_domestic_building,セグメント受注高_国内建築,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;国内建築,国内建築事業,,,0.80,連結/セグメント受注。単独建築受注とは混ぜない
 segment_orders_domestic_civil,セグメント受注高_国内土木,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;国内土木,国内土木事業,,,0.80,連結/セグメント受注。単独土木とは混ぜない
 segment_orders_overseas_building,セグメント受注高_海外建築,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;海外建築,海外建築事業,,,0.80,連結/セグメント受注。単独建築受注とは混ぜない
@@ -26,21 +26,21 @@ segment_orders_overseas_civil,セグメント受注高_海外土木,segment_orde
 segment_orders_overseas_construction,セグメント受注高_海外建設,segment_orders,百万円,segment,current_year,LOCAL_TABLE,,,受注実績;海外建設,海外建設事業,,,0.80,連結/セグメント受注。単独建築受注とは混ぜない
 building_orders_special_contract_ratio,建築受注高_特命比率,orders,%,standalone,current_year,LOCAL_TABLE,,,受注方法;特命;建築,特命比率,,,0.85,
 building_orders_competitive_ratio,建築受注高_競争比率,orders,%,standalone,current_year,LOCAL_TABLE,,,受注方法;競争;建築,競争比率,,,0.85,
-rd_expense,研究開発費,expense,百万円,consolidated,current_year,XBRL_CSV,ResearchAndDevelopmentExpensesIncludedInGeneralAndAdministrativeExpensesAndManufacturingCostForCurrentPeriod;ResearchAndDevelopmentExpensesResearchAndDevelopmentActivities;ResearchAndDevelopmentExpensesSGA;研究開発費,CurrentYearDuration;ConsolidatedMember,,研究開発費,,yoy_anomaly,0.90,
+rd_expense,研究開発費,expense,百万円,consolidated,current_year,XBRL_CSV,ResearchAndDevelopmentExpensesIncludedInGeneralAndAdministrativeExpensesAndManufacturingCostForCurrentPeriod;ResearchAndDevelopmentExpensesResearchAndDevelopmentActivities;ResearchAndDevelopmentExpensesSGA;研究開発費,CurrentYearDuration;ConsolidatedMember,研究開発活動;５ 【研究開発活動】;５【研究開発活動】;６ 【研究開発活動】;６【研究開発活動】;６ 【研究開発活動】,研究開発費,,,0.90,有報では研究開発活動注記または研究開発費タグで明示されるため、前年比異常のみではレビュー対象にしない。
 entertainment_expense,交際費,expense,百万円,standalone,current_year,XBRL_CSV,EntertainmentExpensesSGA;EntertainmentExpenses;交際費,CurrentYearDuration;NonConsolidatedMember,,交際費,,expense_less_than_sga,0.85,
 donation_expense,寄付金,expense,百万円,standalone,current_year,XBRL_CSV,ContributionSGA;Donations;寄付金,CurrentYearDuration;NonConsolidatedMember,,寄付金,,expense_less_than_sga,0.85,
 advertising_expense,広告宣伝費,expense,百万円,standalone,current_year,XBRL_CSV,AdvertisingExpensesSGA;AdvertisingExpenses;広告宣伝費,CurrentYearDuration;NonConsolidatedMember,,広告宣伝費,,expense_less_than_sga;yoy_anomaly,0.85,
-sga_expense,販売費及び一般管理費,expense,百万円,consolidated,current_year,XBRL_CSV,SellingGeneralAndAdministrativeExpenses,CurrentYearDuration;ConsolidatedMember,,,,,0.95,
+sga_expense,販売費及び一般管理費,expense,百万円,consolidated,current_year,XBRL_CSV,SellingGeneralAndAdministrativeExpenses,CurrentYearDuration;ConsolidatedMember,,販売費及び一般管理費,,,0.95,
 net_sales_consolidated,売上高_連結,performance,百万円,consolidated,current_year,XBRL_CSV,NetSales;NetSalesSummaryOfBusinessResults,CurrentYearDuration;ConsolidatedMember,,,,yoy_anomaly,0.95,
-net_sales_standalone,売上高_単独,performance,百万円,standalone,current_year,XBRL_CSV,NetSales;NetSalesSummaryOfBusinessResults,CurrentYearDuration;NonConsolidatedMember,,,,yoy_anomaly,0.90,
+net_sales_standalone,売上高_単独,performance,百万円,standalone,current_year,XBRL_CSV,NetSales;NetSalesSummaryOfBusinessResults,CurrentYearDuration;NonConsolidatedMember,,売上高_単独,,yoy_anomaly,0.90,
 gross_profit_consolidated,売上総利益_連結,performance,百万円,consolidated,current_year,XBRL_CSV,GrossProfit;GrossProfitLoss;売上総利益,CurrentYearDuration;ConsolidatedMember,,売上総利益_連結,,,0.95,
 gross_profit_standalone,売上総利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,GrossProfit;GrossProfitLoss;売上総利益,CurrentYearDuration;NonConsolidatedMember,,売上総利益_単独,,,0.90,
 operating_income_standalone,営業利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,OperatingIncome;ProfitLossFromOperatingActivities;営業利益,CurrentYearDuration;NonConsolidatedMember,,,,,0.90,
 ordinary_income_standalone,経常利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,OrdinaryIncome;経常利益,CurrentYearDuration;NonConsolidatedMember,,,,,0.90,
 profit_attributable_owners_parent,親会社株主帰属当期純利益,performance,百万円,consolidated,current_year,XBRL_CSV,ProfitLossAttributableToOwnersOfParent;ProfitLossAttributableToOwnersOfParentSummaryOfBusinessResults;親会社株主に帰属する当期純利益,CurrentYearDuration;ConsolidatedMember,,,,yoy_anomaly,0.95,
 profit_consolidated,当期純利益_連結,performance,百万円,consolidated,current_year,XBRL_CSV,ProfitLoss,CurrentYearDuration;ConsolidatedMember,,,,yoy_anomaly,0.90,
-total_assets_consolidated,総資産_連結,financial_position,百万円,consolidated,period_end,XBRL_CSV,TotalAssets;TotalAssetsSummaryOfBusinessResults;TotalAssetsIFRSSummaryOfBusinessResults;総資産,CurrentYearInstant;ConsolidatedMember,,,,,0.95,
-total_assets_standalone,総資産_単独,financial_position,百万円,standalone,period_end,XBRL_CSV,TotalAssets;TotalAssetsSummaryOfBusinessResults;TotalAssetsIFRSSummaryOfBusinessResults;総資産,CurrentYearInstant;NonConsolidatedMember,,,,,0.90,
+total_assets_consolidated,総資産_連結,financial_position,百万円,consolidated,period_end,XBRL_CSV,TotalAssets;TotalAssetsSummaryOfBusinessResults;TotalAssetsIFRSSummaryOfBusinessResults;総資産;Assets,CurrentYearInstant;ConsolidatedMember,,,,,0.95,P4bで追加（確定AI map+corroboration由来のxbrl_tag_candidates追記）
+total_assets_standalone,総資産_単独,financial_position,百万円,standalone,period_end,XBRL_CSV,TotalAssets;TotalAssetsSummaryOfBusinessResults;TotalAssetsIFRSSummaryOfBusinessResults;総資産;LiabilitiesAndNetAssets,CurrentYearInstant;NonConsolidatedMember,,,,,0.90,P4bで追加（確定AI map+corroboration由来のxbrl_tag_candidates追記）
 net_assets_consolidated,純資産_連結,financial_position,百万円,consolidated,period_end,XBRL_CSV,NetAssets;純資産合計,CurrentYearInstant;ConsolidatedMember,,,,,0.95,
 net_assets_standalone,純資産_単独,financial_position,百万円,standalone,period_end,XBRL_CSV,NetAssets;純資産合計,CurrentYearInstant;NonConsolidatedMember,,,,,0.90,
 equity_consolidated,自己資本_連結,financial_position,百万円,consolidated,period_end,XBRL_CSV,Equity;OwnersEquity;自己資本;資本合計,CurrentYearInstant;ConsolidatedMember,,,,,0.85,
@@ -48,17 +48,46 @@ equity_ratio_consolidated,自己資本比率_連結,performance,%,consolidated,p
 employees_consolidated,従業員数_連結,human_capital,人,consolidated,period_end,XBRL_CSV,NumberOfEmployees;従業員数,CurrentYearInstant;ConsolidatedMember,,,,,0.90,
 employees_standalone,従業員数_単独,human_capital,人,standalone,period_end,XBRL_CSV,NumberOfEmployees;従業員数,CurrentYearInstant;NonConsolidatedMember,,,,,0.90,
 average_salary,平均給与,human_capital,円,standalone,current_year,XBRL_CSV,AverageAnnualSalary;平均年間給与;平均給与,CurrentYearInstant,従業員の状況;５ 【従業員の状況】,平均年間給与;平均給与,,,0.90,
-average_age,平均年齢,human_capital,歳,standalone,period_end,XBRL_CSV,AverageAge;平均年齢,CurrentYearInstant,従業員の状況;５．従業員の状況;５【従業員の状況】;５ 【従業員の状況】,平均年齢（歳）;平均年齢,,,0.90,
-average_tenure,平均勤続年数,human_capital,年,standalone,period_end,XBRL_CSV,AverageLengthOfService;平均勤続年数,CurrentYearInstant,従業員の状況,平均勤続年数,,,0.90,
+average_age,平均年齢,human_capital,歳,standalone,period_end,XBRL_CSV,AverageAge;平均年齢;jpcrp_cor:AverageAgeYearsInformationAboutReportingCompanyInformationAboutEmployees,CurrentYearInstant,従業員の状況;５．従業員の状況;５【従業員の状況】;５ 【従業員の状況】,平均年齢（歳）;平均年齢,,,0.90,
+average_tenure,平均勤続年数,human_capital,年,standalone,period_end,XBRL_CSV,AverageLengthOfService;平均勤続年数,CurrentYearInstant,従業員の状況;５【従業員の状況】;５ 【従業員の状況】,平均勤続年数,,,0.90,
+architecture_engineers_1st_class,建築一式_技術職員数_一級,human_capital,人,permit_entity,period_end,MANUAL_OBSIDIAN,,,経営事項審査;建築一式;技術職員数,建築技術者数（一級）;一級技術者,,,0.99,CIIC経営事項審査結果通知の建築一式行。Obsidian手整理ノートを正本として取り込む。
+architecture_engineers_1st_class_training,建築一式_技術職員数_一級_講習受講,human_capital,人,permit_entity,period_end,MANUAL_OBSIDIAN,,,経営事項審査;建築一式;技術職員数;講習受講,建築監理技術者数;一級技術者_講習受講,,,0.99,CIIC経営事項審査結果通知の建築一式行。一級技術者のうち講習受講欄。
 cash_and_deposits_consolidated,現金及び預金_連結,financial_position,百万円,consolidated,period_end,XBRL_CSV,CashAndDeposits;CashAndCashEquivalents;現金及び預金;現金及び現金同等物,CurrentYearInstant;ConsolidatedMember,,現金及び預金_連結,,,0.90,
 cash_and_deposits_standalone,現金及び預金_単独,financial_position,百万円,standalone,period_end,XBRL_CSV,CashAndDeposits;CashAndCashEquivalents;現金及び預金;現金及び現金同等物,CurrentYearInstant;NonConsolidatedMember,,,,,0.85,
 cost_materials,材料費,cost,百万円,standalone,current_year,XBRL_CSV,MaterialCosts;材料費,CurrentYearDuration;NonConsolidatedMember,,材料費,,,0.80,
-cost_labor,労務費,cost,百万円,standalone,current_year,XBRL_CSV,LaborCosts;労務費,CurrentYearDuration;NonConsolidatedMember,,労務費,,,0.80,
+cost_labor,労務費,cost,百万円,standalone,current_year,XBRL_CSV,LaborCosts;労務費;jpcrp030000-asr_E00120-000:CostReportOfCompletedConstructionContractsTextBlock,CurrentYearDuration;NonConsolidatedMember,,労務費,,,0.80,
 cost_subcontract,外注費,cost,百万円,standalone,current_year,XBRL_CSV,SubcontractCosts;外注費,CurrentYearDuration;NonConsolidatedMember,,外注費,,,0.80,
-cost_expense,経費,cost,百万円,standalone,current_year,XBRL_CSV,Expenses;経費,CurrentYearDuration;NonConsolidatedMember,【完成工事原価報告書】Ⅳ 経費,経費,,,0.70,
-construction_revenue_consolidated,完成工事高_連結,construction,百万円,consolidated,current_year,XBRL_CSV,NetSalesOfCompletedConstructionContracts;完成工事高,CurrentYearDuration;ConsolidatedMember,,,,yoy_anomaly,0.85,
-construction_revenue_standalone,完成工事高_単独,construction,百万円,standalone,current_year,XBRL_CSV,NetSalesOfCompletedConstructionContracts;完成工事高,CurrentYearDuration;NonConsolidatedMember,,,,yoy_anomaly,0.85,
-construction_gross_profit_consolidated,完成工事総利益_連結,construction,百万円,consolidated,current_year,XBRL_CSV,GrossProfitOnCompletedConstructionContracts;完成工事総利益,CurrentYearDuration;ConsolidatedMember,,,,,0.85,
-construction_gross_profit_standalone,完成工事総利益_単独,construction,百万円,standalone,current_year,XBRL_CSV,GrossProfitOnCompletedConstructionContracts;完成工事総利益,CurrentYearDuration;NonConsolidatedMember,,,,,0.85,
+cost_expense,経費,cost,百万円,standalone,current_year,XBRL_CSV,Expenses;経費;jpcrp030000-asr_E00120-000:CostReportOfCompletedConstructionContractsTextBlock,CurrentYearDuration;NonConsolidatedMember,【完成工事原価報告書】Ⅳ 経費,経費,,,0.70,
+construction_revenue_consolidated,完成工事高_連結,construction,百万円,consolidated,current_year,XBRL_CSV,NetSalesOfCompletedConstructionContracts;完成工事高,CurrentYearDuration;ConsolidatedMember,,完成工事高_連結,,yoy_anomaly,0.85,
+construction_revenue_standalone,完成工事高_単独,construction,百万円,standalone,current_year,XBRL_CSV,NetSalesOfCompletedConstructionContracts;完成工事高,CurrentYearDuration;NonConsolidatedMember,,完成工事高_単独,,yoy_anomaly,0.85,
+construction_gross_profit_consolidated,完成工事総利益_連結,construction,百万円,consolidated,current_year,XBRL_CSV,GrossProfitOnCompletedConstructionContracts;完成工事総利益,CurrentYearDuration;ConsolidatedMember,,完成工事総利益_連結,,,0.85,
+construction_gross_profit_standalone,完成工事総利益_単独,construction,百万円,standalone,current_year,XBRL_CSV,GrossProfitOnCompletedConstructionContracts;完成工事総利益;GrossProfitOnCompletedConstructionContractsCNS,CurrentYearDuration;NonConsolidatedMember,,完成工事総利益_単独,,,0.85,P4bで追加（確定AI map+corroboration由来のxbrl_tag_candidates追記）
 segment_sales_construction,建設セグメント売上高,segment,百万円,segment,current_year,XBRL_CSV,ReportableSegmentsMember;Construction;建設事業;建設,CurrentYearDuration,,,,,0.60,
-segment_profit_construction,建設セグメント利益,segment,百万円,segment,current_year,XBRL_CSV,SegmentProfit;ReportableSegmentsMember;Construction;建設事業;建設,CurrentYearDuration,,,,,0.60,
+segment_profit_construction,建設セグメント利益,segment,百万円,segment,current_year,XBRL_CSV,SegmentProfit;ReportableSegmentsMember;Construction;建設事業;建設,CurrentYearDuration,,建設セグメント利益,,,0.60,
+nc_04b3ae6b17d68200,平均臨時雇用人員（全体）,human_capital,,,current_year,XBRL_CSV,AverageNumberOfTemporaryWorkers,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_140bbe49a3c86b7a,１株当たり親会社所有者帰属持分_IFRS,financial_position,,,current_year,XBRL_CSV,EquityToAssetRatioIFRSSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_25e977441b241f55,１株当たり純資産額_連結,financial_position,,consolidated,current_year,XBRL_CSV,NetAssetsPerShareSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_2ac31242cd2b2efe,不動産売上総利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,GrossProfitRealEstateSalesGP,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_2d3b60309c0b380a,調査研究費及び販売費及び一般管理費_連結,expense,百万円,consolidated,current_year,XBRL_CSV,ResearchStudyExpensesSGA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_2fc2dfb77cc08cc5,平均臨時雇用人員,human_capital,,segment,current_year,XBRL_CSV,AverageNumberOfTemporaryWorkers,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_35dfd11c1fe8a2c1,税引前利益（IFRS）,performance,百万円,,current_year,XBRL_CSV,ProfitLossBeforeTaxIFRSSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_37e49b75d7814861,不動産事業等売上高_建設セグメント,segment,百万円,segment,current_year,XBRL_CSV,NetSalesOfRealEstateBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_3e714e33b5b800e6,売上原価_連結,cost,百万円,consolidated,current_year,XBRL_CSV,CostOfSales,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_4627af64e7a003dc,不動産事業等総利益_建設セグメント,segment,百万円,segment,current_year,XBRL_CSV,GrossProfitOnRealEstateBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_61c490fe96a5e792,完成工事原価_単独,construction,百万円,standalone,current_year,XBRL_CSV,CostOfSalesOfCompletedConstructionContractsCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_65cd128b6b4d5e5c,営業総利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,OperatingGrossProfit,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_703c39473afc7efa,不動産売上総利益,performance,百万円,consolidated,current_year,XBRL_CSV,GrossProfitRealEstateSalesGP,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_745e73b8c32cefe5,セグメント売上原価_開発事業,segment,百万円,segment,current_year,XBRL_CSV,CostOfSalesOnDevelopmentBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_7b97feaf3a4fc39d,不動産事業等売上高,segment,百万円,standalone,current_year,XBRL_CSV,NetSalesOfRealEstateBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_847b0773209e7e0e,完成工事原価_連結,construction,百万円,consolidated,current_year,XBRL_CSV,CostOfSalesOfCompletedConstructionContractsCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_8552da1171de8828,開発事業等売上高_建設セグメント,segment,百万円,segment,current_year,XBRL_CSV,NetSalesOfDevelopmentBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_8977cd60576e3d5f,セグメント売上原価_不動産,segment,百万円,segment,current_year,XBRL_CSV,CostOfSalesOnRealEstateBusinessCOSExpOA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_8afedaddeb1db385,当期純利益_単独,performance,百万円,standalone,current_year,XBRL_CSV,NetIncomeLossSummaryOfBusinessResults;ProfitLoss,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_922a84b8988c8e76,株価収益率,performance,,standalone,current_year,XBRL_CSV,PriceEarningsRatioIFRSSummaryOfBusinessResults;PriceEarningsRatioSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_a45747d55bda572a,１株当たり純資産額_単独,financial_position,,standalone,current_year,XBRL_CSV,NetAssetsPerShareSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_b1b04d647da70e50,臨時雇用人員_単独,human_capital,,standalone,current_year,XBRL_CSV,AverageNumberOfTemporaryWorkers,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_bb57f631b3831e31,セグメント売上高_不動産,segment,百万円,segment,current_year,XBRL_CSV,RealEstateSalesRevOA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_d2bc3126d2f9b06d,不動産売上原価,segment_cost,百万円,standalone,current_year,XBRL_CSV,CostOfSalesRealEstateCOSExpOA,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_f3272e7d6d65fe66,開発事業等総利益_建設セグメント,segment,百万円,segment,current_year,XBRL_CSV,GrossProfitOnDevelopmentBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_f88c4fad2e334bd8,開発事業等売上高,segment,百万円,standalone,current_year,XBRL_CSV,NetSalesOfDevelopmentBusinessAndOtherCNS,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"
+nc_fc2685b577495671,1株当たり利益_IFRS,performance,,,current_year,XBRL_CSV,BasicEarningsLossPerShareIFRSSummaryOfBusinessResults,,,,,,0.85,"P4bで追加（AI提案+人間採用, decided_by=ai:*+human_adopt）"

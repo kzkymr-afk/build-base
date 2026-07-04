@@ -30,6 +30,19 @@ sources:
     raw_store: data/raw/quarterly_documents
     note: "現行の有報抽出とは別スキーマで受け、年度有報と混ぜない。"
 
+  - id: stock_price_monthly
+    name: 株価月次データ
+    enabled: true
+    status: active
+    acquisition_mode: yahoo_finance_chart
+    cadence: monthly
+    canonical_store: data/marts/market/stock_price_monthly.csv
+    raw_store: data/raw/market/yahoo_chart
+    key_columns:
+      - listed_company_id
+      - date
+    note: "月末ベースのOHLC・調整後終値・出来高を保存する。時価総額は発行済株式数ソース追加後に計算する。"
+
   - id: mlit_construction_statistics
     name: 国土交通省統計
     enabled: false
@@ -42,13 +55,33 @@ sources:
 
   - id: company_factbooks
     name: ゼネコン各社ファクトブック
-    enabled: false
-    status: planned
-    acquisition_mode: manual_file_drop
+    enabled: true
+    status: pilot
+    acquisition_mode: configured_url_fetch
     cadence: annual
-    canonical_store: data/marts/company_factbooks
+    canonical_store: data/marts/company_factbooks/building_orders_by_category.csv
     raw_store: data/raw/factbooks
-    note: "PDF/Excel/HTMLが混在する前提で、会社・年度・ページ/シート単位の証跡を保持する。"
+    key_columns:
+      - company_id
+      - fiscal_year
+      - source_dataset_id
+      - source_metric_id
+      - category_type
+      - use_category_raw
+    note: "鹿島・清水・大林組のパイロット。PDF/Excel/HTML/IRPocket JSONが混在する前提で、会社・年度・ページ/シート単位の証跡を保持する。"
+
+  - id: obsidian_manual_technicians
+    name: ゼネコン各社の技術者数 Obsidian手整理ノート
+    enabled: true
+    status: active
+    acquisition_mode: obsidian_markdown_table
+    cadence: annual_manual_update
+    canonical_store: data/marts/manual_technicians/architecture_engineers_long.csv
+    raw_store: ../../Obsidian/Kzky-works/ゼネコン各社の技術者数.md
+    key_columns:
+      - company_year_id
+      - field_id
+    note: "CIIC経営事項審査結果通知の建築一式 技術職員数を、手整理済みObsidianノートから取り込む。ノートの年はfiscal_year_end年としてcompany_year_masterへ突合する。"
 
   - id: peer_excel
     name: 同業他社情報Excel
@@ -59,4 +92,3 @@ sources:
     canonical_store: data/marts/peer_excel
     raw_store: data/raw/user_supplied/peer_excel
     note: "ユーザー提供Excelは原本をrawに保存し、取り込み後の列定義をstagingで固定する。"
-

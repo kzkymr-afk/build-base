@@ -1,0 +1,31 @@
+# BuildBase P5: AIマッピング設定
+#
+# services/ai_mapping.py 専用のサブシステム設定。config_loader.load_pipeline_config()
+# には含めない（既存パイプライン設定と責務を分離するため）。
+#
+# モデルID:
+#   bulk = claude-haiku-4-5-20251001（バッチ判断・低コスト）
+#   hard = claude-sonnet-5（単票の難例・監査）
+#   audit = claude-sonnet-5（AI提案の裏取り監査）
+
+tiers:
+  bulk:
+    model: claude-haiku-4-5-20251001
+    chunk_size: 12
+  hard:
+    model: claude-sonnet-5
+    chunk_size: 1
+  audit:
+    model: claude-sonnet-5
+    chunk_size: 1
+
+timeout_seconds: 120
+
+max_retries: 1
+
+budget:
+  max_calls_per_run: 50
+
+batch_size: 12
+
+min_dir_execution: true

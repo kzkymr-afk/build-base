@@ -31,7 +31,9 @@ class ScopeExclusionTests(unittest.TestCase):
     def test_excluded_fields_are_not_active_definitions(self):
         with (PROJECT_ROOT / "config" / "field_definition.csv").open(encoding="utf-8-sig", newline="") as handle:
             fields = {row["field_id"] for row in csv.DictReader(handle)}
-        self.assertEqual(len(fields), 63)
+        # P4b（field_definition増分エンリッチ）で新概念27件が追加され65→92行になった。
+        # 除外フィールドが含まれないことが本テストの主旨であり、行数は増分エンリッチ分を許容する。
+        self.assertEqual(len(fields), 92)
         self.assertFalse(EXCLUDED_FIELDS & fields)
         self.assertIn("building_orders_special_contract_ratio", fields)
         self.assertIn("building_orders_competitive_ratio", fields)

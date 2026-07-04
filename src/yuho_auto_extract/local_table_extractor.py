@@ -97,12 +97,12 @@ def _extract_review_hint_rows(block: Dict[str, Any]) -> List[Dict[str, Any]]:
         values.setdefault(field_id, value)
 
     out: List[Dict[str, Any]] = []
-    scope = "standalone" if "提出会社" in segment else str(block.get("scope_hint") or "standalone")
     for field_id in target_fields:
         value = values.get(field_id)
         if value is None:
             continue
         number, row_index, unit = value
+        scope = _review_value_scope(block, field_id, segment, lines, row_index)
         out.append(
             _row(
                 block,
@@ -121,10 +121,46 @@ def _extract_review_hint_rows(block: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
+def _review_value_scope(block: Dict[str, Any], field_id: str, segment: str, lines: List[str], row_index: int) -> str:
+    local_text = " ".join(lines[max(0, row_index - 2) : min(len(lines), row_index + 3)])
+    standalone_first = field_id in {"average_age", "average_salary", "average_tenure"}
+    if standalone_first:
+        if _has_standalone_scope(local_text):
+            return "standalone"
+        if _has_consolidated_scope(local_text):
+            return "consolidated"
+        if _has_standalone_scope(segment):
+            return "standalone"
+        if _has_consolidated_scope(segment):
+            return "consolidated"
+    else:
+        if _has_consolidated_scope(local_text):
+            return "consolidated"
+        if _has_standalone_scope(local_text):
+            return "standalone"
+        if _has_consolidated_scope(segment):
+            return "consolidated"
+        if _has_standalone_scope(segment):
+            return "standalone"
+    return str(block.get("scope_hint") or "standalone")
+
+
+def _has_consolidated_scope(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text)
+    return any(marker in normalized for marker in ["連結", "当社グループ", "企業集団", "グループ"])
+
+
+def _has_standalone_scope(text: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", text)
+    return any(marker in normalized for marker in ["提出会社", "単独", "個別"])
+
+
 def _review_hint_segment(text: str, block: Dict[str, Any]) -> str:
     if not text:
         return ""
-    preferred = [word for word in ["提出会社の状況", "提出会社"] if word in text]
+    target_fields = {str(field_id) for field_id in block.get("target_fields", [])}
+    employee_fields = {"average_age", "average_salary", "average_tenure"}
+    preferred = [word for word in ["提出会社の状況", "提出会社"] if word in text] if target_fields & employee_fields else []
     if preferred:
         start = min(text.find(word) for word in preferred if text.find(word) >= 0)
     else:
@@ -242,10 +278,19 @@ def _review_generic_values(
             )
             unit = _review_generic_unit(block, field_id, line)
             value = _review_value_after_label(lines, line_index, int(match["end"]), next_label_start, unit)
+            if value is None and _review_zero_value_line(line):
+                value = 0.0
             if value is None or not _review_value_plausible(field_id, value, unit):
                 continue
             out[field_id] = (value, line_index, unit)
     return out
+
+
+def _review_zero_value_line(line: str) -> bool:
+    normalized = unicodedata.normalize("NFKC", line)
+    if any(marker in normalized for marker in ["特記事項なし", "該当事項なし", "該当なし"]):
+        return True
+    return bool(re.search(r"研究開発活動.{0,30}なし", normalized))
 
 
 def _review_generic_labels_by_field(block: Dict[str, Any], target_fields: List[str]) -> Dict[str, List[str]]:

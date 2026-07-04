@@ -3,12 +3,16 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.run/
+*.egg-info/
 *.pyc
 .DS_Store
 web/node_modules/
 web/dist/
 web/tsconfig.tsbuildinfo
 *.bak-*
+*.bak.csv
+*.bak.xlsx
 config/*.xlsx
 data/*
 !data/.gitkeep

@@ -9,8 +9,14 @@ from yuho_auto_extract.services.ai_prompt import build_prompt
 from yuho_auto_extract.services.datasets import read_cell_detail, read_chart_data, read_options, read_review_queue, read_wide
 from yuho_auto_extract.services import pipeline
 from yuho_auto_extract.services.review_learning_impact import capture_field_coverage, write_review_learning_impact
-from yuho_auto_extract.services.reviews import delete_resolved_reviews, mark_resolved_reviews_applied, upsert_resolved_reviews
+from yuho_auto_extract.services.reviews import (
+    delete_resolved_reviews,
+    mark_company_field_not_applicable,
+    mark_resolved_reviews_applied,
+    upsert_resolved_reviews,
+)
 from yuho_auto_extract.services.rule_candidates import (
+    _sanitize_candidate_values,
     apply_rule_candidates,
     build_rule_candidates,
     generate_rule_candidates,
@@ -55,6 +61,52 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(result["rows"][0]["sales"], 1234.0)
             self.assertEqual(result["fields"][0]["name"], "ROE")
             self.assertEqual(result["companies"][0]["label"], "A社（A）")
+
+    def test_chart_data_does_not_pick_default_fields_without_explicit_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "category": "finance", "target_unit": "%"}])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": "8.2"}])
+
+            result = read_chart_data(root, companies=["A"], fiscal_years=["2024"], fields=[])
+
+            self.assertEqual(result["total"], 0)
+            self.assertEqual(result["rows"], [])
+            self.assertEqual(result["fields"], [])
+
+    def test_chart_data_includes_source_summary_for_selected_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "sales", "field_name_ja": "売上高", "category": "finance", "target_unit": "百万円"}])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "sales": "1,234"}])
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "sales",
+                        "field_name_ja": "売上高",
+                        "value": "1234",
+                        "unit_normalized": "百万円",
+                        "data_scope": "consolidated",
+                        "source_doc_id": "S100TEST",
+                        "source_file": "edinet.db:xbrl_facts",
+                        "source_heading": "NetSales",
+                        "source_quote": "売上高: 1234000000",
+                        "extraction_method": "XBRL_CSV",
+                        "confidence": "0.95",
+                    }
+                ],
+            )
+
+            result = read_chart_data(root, companies=["A"], fiscal_years=["2024"], fields=["sales"])
+
+            self.assertEqual(result["sources"][0]["company_name"], "A社")
+            self.assertEqual(result["sources"][0]["field_name"], "売上高")
+            self.assertEqual(result["sources"][0]["source_doc_id"], "S100TEST")
+            self.assertEqual(result["sources"][0]["source_quote"], "売上高: 1234000000")
 
     def test_derived_ratio_fields_are_available_without_mutating_wide_source(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,6 +161,31 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(chart["rows"][0]["rd_expense_to_net_sales_consolidated_ratio"], 1.0)
             self.assertEqual(wide["rows"][0]["construction_segment_profit_margin"], 5.0)
             self.assertFalse((root / "data" / "final" / "final_master_wide.csv").read_text(encoding="utf-8").count("construction_segment_profit_margin"))
+
+    def test_result_field_presets_cover_all_fields_and_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "company_year_master.csv", [{"company_year_id": "A_2024", "fiscal_year": "2024"}])
+            write_table(
+                root / "config" / "field_definition.csv",
+                [
+                    {"field_id": "net_sales_consolidated", "field_name_ja": "売上高_連結", "category": "performance", "target_unit": "百万円"},
+                    {"field_id": "total_assets_consolidated", "field_name_ja": "総資産_連結", "category": "financial_position", "target_unit": "百万円"},
+                    {"field_id": "building_orders_overseas", "field_name_ja": "建築受注高_海外", "category": "orders", "target_unit": "百万円"},
+                    {"field_id": "architecture_engineers_1st_class", "field_name_ja": "建築一式_技術職員数_一級", "category": "human_capital", "target_unit": "人"},
+                ],
+            )
+
+            options = read_options(root)
+            fields = {field["id"] for field in options["fields"]}
+            presets = {preset["id"]: preset for preset in options["field_presets"]}
+
+            self.assertEqual(fields, set(presets["all"]["fields"]))
+            self.assertIn("building_orders_overseas", presets["orders"]["fields"])
+            self.assertIn("architecture_engineers_1st_class", presets["human_capital"]["fields"])
+            self.assertIn("construction_segment_profit_margin", presets["derived_ratios"]["fields"])
+            self.assertEqual(presets["financial_position"]["name"], "財政状態")
 
     def test_cost_composition_ratio_does_not_treat_missing_components_as_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -208,6 +285,24 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(resolved[0]["corrected_value"], "0.14")
             self.assertEqual(resolved[0]["reviewer_note"], "rechecked")
 
+    def test_review_upsert_accepts_not_applicable_without_corrected_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [{"company_year_id": "INFR_2024", "field_id": "cost_labor", "extracted_value": ""}],
+            )
+
+            result = upsert_resolved_reviews(
+                root,
+                [{"company_year_id": "INFR_2024", "field_id": "cost_labor", "review_decision": "not_applicable"}],
+            )
+
+            self.assertEqual(result["changed"], 1)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual(resolved[0]["review_decision"], "not_applicable")
+            self.assertEqual(resolved[0]["corrected_value"], "")
+
     def test_review_upsert_clears_applied_state_after_edit(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -283,6 +378,7 @@ class WebServiceTests(unittest.TestCase):
                         "field_id": "roe",
                         "field_name_ja": "ROE",
                         "extracted_value": "0.12",
+                        "review_reason": "validation_warn",
                     },
                     {
                         "company_year_id": "A_2024",
@@ -319,10 +415,172 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(roe["reviewer_note"], "保存済みメモ")
             self.assertEqual(roe["applied_status"], "")
             self.assertEqual(roe["extracted_value"], "0.12")
+            self.assertEqual(roe["review_category"], "saved_unapplied")
+            self.assertEqual(roe["review_category_label"], "保存済み未反映")
+            average_age = next(row for row in all_rows if row["field_id"] == "average_age")
+            self.assertEqual(average_age["review_category"], "missing")
+            self.assertEqual(average_age["review_category_label"], "未取得")
+            self.assertEqual(read_review_queue(root)["review_category_counts"], {"saved_unapplied": 1, "missing": 1})
             self.assertEqual(len(saved_rows), 1)
             self.assertEqual(saved_rows[0]["field_id"], "roe")
             self.assertEqual(len(unsaved_rows), 1)
             self.assertEqual(unsaved_rows[0]["field_id"], "average_age")
+
+    def test_review_queue_splits_warning_categories_and_filters_by_category(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "orders",
+                        "extracted_value": "100",
+                        "review_reason": "validation_fail",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "scope",
+                        "extracted_value": "100",
+                        "review_reason": "data_scope_mismatch",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "confidence",
+                        "extracted_value": "100",
+                        "review_reason": "confidence_below_threshold",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "blank",
+                        "extracted_value": "",
+                        "review_reason": "xbrl_tag_not_found",
+                    },
+                ],
+            )
+
+            all_rows = read_review_queue(root, review_status="active")
+            validation_rows = read_review_queue(root, review_status="active", review_category="validation_issue")["rows"]
+            scope_rows = read_review_queue(root, review_status="active", review_category="scope_warning")["rows"]
+            warning_rows = read_review_queue(root, review_status="active", review_category="warning_candidate")["rows"]
+
+            self.assertEqual(
+                all_rows["review_category_counts"],
+                {"validation_issue": 1, "scope_warning": 1, "warning_candidate": 1, "missing": 1},
+            )
+            self.assertEqual(validation_rows[0]["field_id"], "orders")
+            self.assertEqual(scope_rows[0]["field_id"], "scope")
+            self.assertEqual(warning_rows[0]["field_id"], "confidence")
+            self.assertEqual(all_rows["review_category_labels"]["validation_issue"], "検算要確認")
+            self.assertEqual(all_rows["review_category_labels"]["scope_warning"], "スコープ警告")
+
+    def test_mark_company_field_not_applicable_saves_all_matching_company_years_and_exclusion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "INFR", "operating_company_name": "インフロニア"}])
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {"company_year_id": "INFR_2023", "fiscal_year": "2023", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "INFR_2024", "fiscal_year": "2024", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2024", "fiscal_year": "2024", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                ],
+            )
+
+            result = mark_company_field_not_applicable(root, "INFR", "cost_labor", "HDなので対象外")
+
+            self.assertEqual(result["marked"], 2)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual({row["company_year_id"] for row in resolved}, {"INFR_2023", "INFR_2024"})
+            self.assertTrue(all(row["review_decision"] == "not_applicable" for row in resolved))
+            exclusions = read_table(root / "config" / "company_field_exclusions.csv")
+            self.assertEqual(exclusions[0]["company_id"], "INFR")
+            self.assertEqual(exclusions[0]["field_id"], "cost_labor")
+
+            active_rows = read_review_queue(root, review_status="active")["rows"]
+            self.assertEqual([row["company_year_id"] for row in active_rows], ["MAEDA_2024"])
+
+    def test_mark_company_field_not_applicable_can_be_limited_by_fiscal_year_range(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {"company_year_id": "MAEDA_2020", "fiscal_year": "2020", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2021", "fiscal_year": "2021", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2022", "fiscal_year": "2022", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2023", "fiscal_year": "2023", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                ],
+            )
+
+            result = mark_company_field_not_applicable(root, "MAEDA", "cost_labor", "HD化後は対象外", start_year=2022)
+
+            self.assertEqual(result["marked"], 2)
+            self.assertEqual(result["start_year"], 2022)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual({row["company_year_id"] for row in resolved}, {"MAEDA_2022", "MAEDA_2023"})
+            exclusions = read_table(root / "config" / "company_field_exclusions.csv")
+            self.assertEqual(exclusions[0]["company_id"], "MAEDA")
+            self.assertEqual(exclusions[0]["field_id"], "cost_labor")
+            self.assertEqual(exclusions[0]["start_year"], "2022")
+            self.assertEqual(exclusions[0]["end_year"], "")
+
+    def test_mark_company_field_not_applicable_can_exclude_between_years_without_boundary_years(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {"company_year_id": "MAEDA_2021", "fiscal_year": "2021", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2022", "fiscal_year": "2022", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2023", "fiscal_year": "2023", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2024", "fiscal_year": "2024", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                ],
+            )
+
+            result = mark_company_field_not_applicable(root, "MAEDA", "cost_labor", "境目年度は除外しない", start_year=2022, end_year=2023)
+
+            self.assertEqual(result["marked"], 2)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual({row["company_year_id"] for row in resolved}, {"MAEDA_2022", "MAEDA_2023"})
+            exclusions = read_table(root / "config" / "company_field_exclusions.csv")
+            self.assertEqual(exclusions[0]["start_year"], "2022")
+            self.assertEqual(exclusions[0]["end_year"], "2023")
+
+    def test_mark_company_field_not_applicable_replaces_old_all_year_exclusion_and_stale_reviews(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "company_field_exclusions.csv",
+                [{"company_id": "MAEDA", "field_id": "cost_labor", "reason": "old all years"}],
+            )
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {"company_year_id": "MAEDA_2021", "fiscal_year": "2021", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2022", "fiscal_year": "2022", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                    {"company_year_id": "MAEDA_2023", "fiscal_year": "2023", "field_id": "cost_labor", "field_name_ja": "労務費"},
+                ],
+            )
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [
+                    {"company_year_id": "MAEDA_2021", "fiscal_year": "2021", "field_id": "cost_labor", "review_decision": "not_applicable"},
+                    {"company_year_id": "MAEDA_2022", "fiscal_year": "2022", "field_id": "cost_labor", "review_decision": "not_applicable"},
+                    {"company_year_id": "MAEDA_2023", "fiscal_year": "2023", "field_id": "cost_labor", "review_decision": "not_applicable"},
+                ],
+            )
+
+            result = mark_company_field_not_applicable(root, "MAEDA", "cost_labor", "2023以降のみ", start_year=2023)
+
+            self.assertEqual(result["marked"], 1)
+            self.assertEqual(result["replaced_exclusions"], 1)
+            self.assertEqual(result["stale_not_applicable_deleted"], 2)
+            exclusions = read_table(root / "config" / "company_field_exclusions.csv")
+            self.assertEqual(len(exclusions), 1)
+            self.assertEqual(exclusions[0]["start_year"], "2023")
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual([row["company_year_id"] for row in resolved], ["MAEDA_2023"])
 
     def test_mark_resolved_reviews_applied_records_final_value(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -359,6 +617,22 @@ class WebServiceTests(unittest.TestCase):
             self.assertTrue(rows[("A_2024", "roe")]["applied_at"])
             self.assertEqual(rows[("A_2024", "average_age")]["applied_status"], "rejected")
             self.assertEqual(rows[("B_2024", "roe")]["applied_status"], "not_found")
+
+    def test_mark_resolved_reviews_applied_records_not_applicable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [{"company_year_id": "INFR_2024", "field_id": "cost_labor", "review_decision": "not_applicable"}],
+            )
+
+            result = mark_resolved_reviews_applied(root)
+
+            self.assertEqual(result["total"], 1)
+            row = read_table(root / "data" / "review" / "review_resolved.csv")[0]
+            self.assertEqual(row["applied_status"], "not_applicable")
+            self.assertEqual(row["applied_value"], "")
+            self.assertTrue(row["applied_at"])
 
     def test_review_upsert_rejects_key_not_in_queue(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -722,6 +996,47 @@ class WebServiceTests(unittest.TestCase):
             self.assertIn("百万円", candidate["proposed_unit"])
             self.assertIn("review_value_only", candidate["learning_source"])
 
+    def test_build_rule_candidates_infers_zero_value_from_review_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "field_definition.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "target_unit": "百万円",
+                        "data_scope_required": "consolidated",
+                        "section_keywords": "研究開発活動",
+                        "synonyms_ja": "研究開発費",
+                    }
+                ],
+            )
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [
+                    {
+                        "company_year_id": "MATSUI_2024",
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "review_decision": "correct",
+                        "corrected_value": "0",
+                        "reviewer_note": "6 【研究開発活動】\n特記事項なし",
+                    }
+                ],
+            )
+
+            candidates = build_rule_candidates(root)
+
+            self.assertEqual(len(candidates), 1)
+            candidate = candidates[0]
+            self.assertEqual(candidate["field_id"], "rd_expense")
+            self.assertIn("研究開発活動", candidate["proposed_section_keywords"])
+            self.assertIn("研究開発費", candidate["proposed_row_labels"])
+            self.assertNotIn("特記事項なし", candidate["proposed_row_labels"])
+            self.assertIn("0", candidate["reviewed_value_examples"])
+            self.assertIn("zero_value_review_note", candidate["learning_source"])
+
     def test_apply_rule_candidates_merges_field_definition_and_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -785,6 +1100,60 @@ class WebServiceTests(unittest.TestCase):
             self.assertTrue(any("field_definition.csv.bak-" in path for path in result["backups"]))
             self.assertTrue(any("extraction_sections.yml.bak-" in path for path in result["backups"]))
 
+    def test_apply_rd_expense_candidate_cleans_existing_noise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "field_definition.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "target_unit": "百万円",
+                        "xbrl_tag_candidates": "",
+                        "section_keywords": "研究開発活動;受注高;完成工事高;売上高",
+                        "synonyms_ja": "研究開発費;なし;受注工事高",
+                    }
+                ],
+            )
+            write_yaml(
+                root / "config" / "extraction_sections.yml",
+                {
+                    "review_rd_expense": {
+                        "heading_keywords": ["研究開発活動", "受注高", "完成工事高"],
+                        "table_keywords": ["研究開発費", "受注工事高", "なし"],
+                        "review_table_keywords": ["研究開発費", "受注工事高"],
+                        "review_row_labels": ["研究開発費", "なし", "受注工事高"],
+                        "review_row_labels_by_field": {"rd_expense": ["研究開発費", "なし", "受注工事高"]},
+                        "target_fields": ["rd_expense"],
+                    }
+                },
+            )
+            write_table(
+                root / "data" / "review" / "rule_candidates.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "proposed_section_keywords": "研究開発活動",
+                        "proposed_row_labels": "研究開発費",
+                    }
+                ],
+            )
+
+            result = apply_rule_candidates(root, ["rd_expense"])
+
+            self.assertEqual(result["applied_candidates"], 1)
+            field = read_table(root / "config" / "field_definition.csv")[0]
+            self.assertEqual(field["section_keywords"], "研究開発活動")
+            self.assertEqual(field["synonyms_ja"], "研究開発費")
+            section = read_yaml(root / "config" / "extraction_sections.yml")["review_rd_expense"]
+            self.assertEqual(section["heading_keywords"], ["研究開発活動"])
+            self.assertEqual(section["table_keywords"], ["研究開発費"])
+            self.assertEqual(section["review_table_keywords"], ["研究開発費"])
+            self.assertEqual(section["review_row_labels"], ["研究開発費"])
+            self.assertEqual(section["review_row_labels_by_field"], {"rd_expense": ["研究開発費"]})
+
     def test_apply_rule_candidates_marks_candidate_applied_and_hides_from_active(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -829,7 +1198,7 @@ class WebServiceTests(unittest.TestCase):
             decisions = read_table(root / "data" / "review" / "rule_candidate_decisions.csv")
             self.assertEqual(decisions[0]["candidate_status"], "applied")
 
-    def test_generated_rule_candidate_stays_hidden_after_apply(self):
+    def test_generated_rule_candidate_with_same_signature_stays_hidden_after_apply(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_table(
@@ -918,12 +1287,12 @@ class WebServiceTests(unittest.TestCase):
                     {
                         "company_year_id": "B_2024",
                         "section_name": "review_average_salary",
-                        "heading_keywords": ["別セクション"],
+                        "heading_keywords": ["従業員の状況"],
                         "table_keywords": ["提出会社の状況", "平均年間給与"],
                         "target_fields": ["average_salary"],
                         "unit_hint": "円",
                         "scope_hint": "standalone",
-                        "raw_text": "別セクション 提出会社の状況 平均年間給与(円) 9,000,000",
+                        "raw_text": "従業員の状況 提出会社の状況 平均年間給与(円) 9,000,000",
                     },
                 ],
             )
@@ -935,6 +1304,61 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(regenerated["status_counts"], {"active": 0, "applied": 1, "all": 1})
             self.assertEqual(read_rule_candidates(root, candidate_status="active"), [])
             self.assertEqual(len(read_rule_candidates(root, candidate_status="applied")), 1)
+
+    def test_generated_rule_candidate_with_new_signature_stays_active_after_field_apply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "field_definition.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "target_unit": "百万円",
+                        "data_scope_required": "consolidated",
+                        "section_keywords": "研究開発活動",
+                        "synonyms_ja": "研究開発費",
+                    }
+                ],
+            )
+            write_yaml(root / "config" / "extraction_sections.yml", {})
+            write_table(
+                root / "data" / "review" / "rule_candidates.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "proposed_section_keywords": "研究開発活動",
+                        "proposed_row_labels": "研究開発費",
+                        "proposed_scope": "consolidated",
+                        "proposed_unit": "百万円",
+                    }
+                ],
+            )
+            apply_rule_candidates(root, ["rd_expense"])
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [
+                    {
+                        "company_year_id": "MATSUI_2024",
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "review_decision": "correct",
+                        "corrected_value": "0",
+                        "reviewer_note": "6 【研究開発活動】\n特記事項なし",
+                    }
+                ],
+            )
+
+            generated = generate_rule_candidates(root)
+
+            self.assertEqual(generated["total"], 0)
+            self.assertEqual(generated["applied_total"], 1)
+            active = read_rule_candidates(root, candidate_status="active")
+            self.assertEqual(len(active), 0)
+            applied = read_rule_candidates(root, candidate_status="applied")
+            self.assertEqual(len(applied), 1)
+            self.assertNotIn("特記事項なし", applied[0]["proposed_row_labels"])
 
     def test_review_learning_impact_reports_field_level_deltas(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1044,6 +1468,55 @@ class WebServiceTests(unittest.TestCase):
 
             self.assertEqual([row["company_year_id"] for row in active_rows], ["B_2024", "C_2024"])
             self.assertEqual(len(all_rows), 3)
+
+    def test_rule_candidates_include_last_learning_impact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "rule_candidates.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "field_name_ja": "研究開発費",
+                        "evidence_count": "2",
+                        "candidate_status": "active",
+                    }
+                ],
+            )
+            write_table(
+                root / "data" / "review" / "review_learning_impact.csv",
+                [
+                    {
+                        "field_id": "rd_expense",
+                        "filled_delta": "5",
+                        "review_queue_after": "196",
+                        "auto_applied": "yes",
+                        "applied_columns": "xbrl_tag_candidates",
+                        "applied_sections": "review_rd_expense",
+                    }
+                ],
+            )
+
+            rows = read_rule_candidates(root)
+
+            self.assertEqual(rows[0]["last_filled_delta"], "5")
+            self.assertEqual(rows[0]["last_review_queue_after"], "196")
+            self.assertEqual(rows[0]["last_auto_applied"], "yes")
+            self.assertEqual(rows[0]["last_applied_columns"], "xbrl_tag_candidates")
+
+    def test_rd_expense_candidate_sanitizer_drops_order_backlog_noise(self):
+        self.assertEqual(
+            _sanitize_candidate_values(
+                "rd_expense",
+                "section_keywords",
+                ["研究開発活動", "受注高", "完成工事高", "売上高", "６ 【研究開発活動】"],
+            ),
+            ["研究開発活動", "６ 【研究開発活動】"],
+        )
+        self.assertEqual(
+            _sanitize_candidate_values("rd_expense", "row_labels", ["研究開発費", "なし", "受注工事高"]),
+            ["研究開発費"],
+        )
 
     def test_reextract_with_review_runs_reextract_then_saved_review_apply(self):
         calls = []
@@ -1265,6 +1738,41 @@ class WebServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(rows, [])
+
+    def test_review_queue_skips_company_field_exclusions(self):
+        rows = build_review_queue(
+            [
+                {"company_year_id": "INFR_2024", "field_id": "cost_labor", "value": "", "review_required": True, "review_reason": "blank"},
+                {"company_year_id": "MAEDA_2024", "field_id": "cost_labor", "value": "", "review_required": True, "review_reason": "blank"},
+            ],
+            [{"field_id": "cost_labor", "field_name_ja": "労務費"}],
+            [
+                {"company_year_id": "INFR_2024", "fiscal_year": "2024", "operating_company_id": "INFR"},
+                {"company_year_id": "MAEDA_2024", "fiscal_year": "2024", "operating_company_id": "MAEDA"},
+            ],
+            company_field_exclusions=[{"company_id": "INFR", "field_id": "cost_labor"}],
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["company_year_id"], "MAEDA_2024")
+
+    def test_review_queue_applies_company_field_exclusions_only_inside_year_range(self):
+        rows = build_review_queue(
+            [
+                {"company_year_id": "MAEDA_2020", "field_id": "cost_labor", "value": "", "review_required": True, "review_reason": "blank"},
+                {"company_year_id": "MAEDA_2022", "field_id": "cost_labor", "value": "", "review_required": True, "review_reason": "blank"},
+                {"company_year_id": "MAEDA_2024", "field_id": "cost_labor", "value": "", "review_required": True, "review_reason": "blank"},
+            ],
+            [{"field_id": "cost_labor", "field_name_ja": "労務費"}],
+            [
+                {"company_year_id": "MAEDA_2020", "fiscal_year": "2020", "operating_company_id": "MAEDA"},
+                {"company_year_id": "MAEDA_2022", "fiscal_year": "2022", "operating_company_id": "MAEDA"},
+                {"company_year_id": "MAEDA_2024", "fiscal_year": "2024", "operating_company_id": "MAEDA"},
+            ],
+            company_field_exclusions=[{"company_id": "MAEDA", "field_id": "cost_labor", "start_year": "2022"}],
+        )
+
+        self.assertEqual([row["company_year_id"] for row in rows], ["MAEDA_2020"])
 
 
 if __name__ == "__main__":

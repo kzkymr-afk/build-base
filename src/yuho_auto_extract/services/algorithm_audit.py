@@ -20,7 +20,7 @@ COPY_FILES = [
     ("data/final/run_report.md", "reports/run_report.md", "直近実行の全体サマリー。"),
     ("data/final/field_coverage.csv", "reports/field_coverage.csv", "項目別カバレッジ。低カバレッジ項目の監査に使う。"),
     ("data/review/rule_candidates.csv", "review/rule_candidates.csv", "レビューから作られた抽出ルール候補。"),
-    ("data/review/review_resolved.csv", "review/review_resolved.csv", "人間が保存したレビュー判断。"),
+    ("data/review/review_resolved.csv", "review/review_resolved.csv", "保存済みレビュー判断。"),
     ("src/yuho_auto_extract/section_locator.py", "code/section_locator.py", "候補ブロック探索ロジック。"),
     ("src/yuho_auto_extract/local_table_extractor.py", "code/local_table_extractor.py", "ローカル表抽出ロジック。レビュー由来ルールの受け皿。"),
     ("src/yuho_auto_extract/edinet_db.py", "code/edinet_db.py", "XBRL DB抽出とローカル抽出の統合箇所。"),
@@ -30,7 +30,8 @@ COPY_FILES = [
 
 GENERATED_FILES = [
     ("README.md", "監査パックの使い方。"),
-    ("ALGORITHM_AUDIT_PROMPT.md", "AIに渡す固定監査プロンプト。"),
+    ("ALGORITHM_AUDIT_PROMPT.md", "AI/Codexに渡す固定監査プロンプト。"),
+    ("CODEX_MAINTENANCE_PROMPT.md", "Codexに渡す監査・実装プロンプト。"),
     ("manifest.json", "生成日時と同梱ファイル一覧。"),
     ("field_algorithm_inventory.csv", "項目別の抽出方式・カバレッジ・レビュー由来状況。"),
     ("section_inventory.csv", "抽出セクション別のキーワードと対象項目。"),
@@ -74,12 +75,14 @@ def build_algorithm_audit_bundle(root: Path) -> Dict[str, Any]:
     prompt = _audit_prompt()
     readme = _readme(generated + copied)
     (audit_dir / "ALGORITHM_AUDIT_PROMPT.md").write_text(prompt, encoding="utf-8")
+    (audit_dir / "CODEX_MAINTENANCE_PROMPT.md").write_text(prompt, encoding="utf-8")
     (audit_dir / "README.md").write_text(readme, encoding="utf-8")
 
     generated.extend(
         [
             _file_row(audit_dir, audit_dir / "README.md", "監査パックの使い方。"),
-            _file_row(audit_dir, audit_dir / "ALGORITHM_AUDIT_PROMPT.md", "AIに渡す固定監査プロンプト。"),
+            _file_row(audit_dir, audit_dir / "ALGORITHM_AUDIT_PROMPT.md", "AI/Codexに渡す固定監査プロンプト。"),
+            _file_row(audit_dir, audit_dir / "CODEX_MAINTENANCE_PROMPT.md", "Codexに渡す監査・実装プロンプト。"),
         ]
     )
 
@@ -109,6 +112,7 @@ def build_algorithm_audit_bundle(root: Path) -> Dict[str, Any]:
         "files": manifest["files"],
         "prompt": prompt,
         "prompt_path": str(audit_dir / "ALGORITHM_AUDIT_PROMPT.md"),
+        "maintenance_prompt_path": str(audit_dir / "CODEX_MAINTENANCE_PROMPT.md"),
         "readme_path": str(audit_dir / "README.md"),
     }
 
@@ -383,9 +387,11 @@ def _local_rule_samples(source_audit_rows: Sequence[Dict[str, Any]], limit: int 
 
 
 def _audit_prompt() -> str:
-    return """# 有報抽出アルゴリズム定期監査
+    return """# 有報抽出アルゴリズム定期メンテナンス
 
-あなたは財務データ抽出パイプラインの監査者です。目的は、レビュー由来のルール追加が局所最適・過剰適合・非効率な分岐の山になっていないかを点検し、保守可能なアルゴリズムへ整理することです。
+あなたはBuildBaseの保守者です。目的は、レビュー由来のルール追加が局所最適・過剰適合・非効率な分岐の山になっていないかを点検し、保守可能なアルゴリズムへ整理し、必要なコード・設定・テストを実装することです。
+
+ユーザーはコード知識を前提にしません。コード妥当性の確認をユーザーに求めず、Codex/AIが監査、実装、テスト、差分説明まで担当してください。ユーザーに確認を求めるのは、業務上の採用判断、破壊的なデータ削除、外部API・課金・公開範囲に影響する変更だけです。
 
 ## 参照ファイル
 
@@ -411,27 +417,29 @@ def _audit_prompt() -> str:
 - standalone、consolidated、segment を混同しない。
 - source_quote の根拠がない値を推定で埋めない。
 - 1社1年度だけのレビュー証跡を、十分な根拠なく全社共通ルールに昇格しない。
-- 人間が保存したレビュー値は監査証跡として扱い、勝手に削除・上書き前提にしない。
+- `review_resolved.csv` は保存済みレビューの監査証跡として扱い、勝手に削除・上書きしない。
+- `review_queue.csv` や自動判定出力を、UIや自動処理から直接破壊的に上書きしない。
+- 新しい抽出値は、source_quote、対象年度、単位、スコープを必ず確認できる形で残す。
 
-## 監査してほしい観点
+## メンテナンス手順
 
 1. `review_*` セクションが増えすぎていないか。統合できる汎用パーサはあるか。
 2. `rule_candidates.csv` の証跡数が少ないのに全社共通化されているものはないか。
 3. `field_definition.csv` の XBRL候補・同義語・セクションキーワードが広がりすぎて誤抽出リスクを上げていないか。
 4. `LOCAL_RULE_TABLE` が増えている項目について、XBRL補完なのか、正式に表パーサへ昇格すべきなのか。
-5. 低カバレッジ項目は、対象外・人間レビュー継続・汎用ルール追加のどれが妥当か。
-6. テストで固定すべき代表パターンと、削除または保留すべきルールは何か。
+5. 低カバレッジ項目は、対象外・レビュー継続・汎用ルール追加のどれが妥当か。
+6. 通常リスクの改善は、提案だけで止めずにコード・設定・テストへ反映する。
+7. 高リスクまたは業務判断が必要な変更だけ、理由と選択肢を短く報告して停止する。
 
 ## 出力形式
 
-以下の順で、短く具体的に提案してください。
+以下の順で、短く具体的に報告してください。
 
-1. 高リスク事項: すぐ直すべき順に列挙。
-2. 統合候補: 個別 `review_*` から汎用パーサへ移すべきもの。
-3. 保留/削除候補: 証跡不足、過剰適合、誤抽出リスクがあるもの。
-4. 設定整理案: `field_definition.csv` / `extraction_sections.yml` / `validation_rules.yml` の修正方針。
-5. テスト追加案: どの表パターンをユニットテスト化すべきか。
-6. 次回の人間レビューで集めるべきメモ: LOC/TABLE/LABEL/SCOPE/QUOTE の具体例。
+1. 実装した改善: 変更ファイルと狙い。
+2. レビュー由来のルール追加の整理結果: 統合、保留、維持の判断。
+3. テスト結果: 実行したコマンドと結果。
+4. 残リスク: source_quote不足、スコープ不明、低カバレッジなど。
+5. 次に集めるべきレビュー材料: LOC/TABLE/LABEL/SCOPE/QUOTE の具体例。
 """
 
 
@@ -439,13 +447,14 @@ def _readme(files: Sequence[Dict[str, Any]]) -> str:
     file_lines = "\n".join(f"- `{row['file']}`: {row['description']}" for row in files)
     return f"""# Algorithm Audit Bundle
 
-このフォルダは、有報抽出パイプラインのアルゴリズムをAIに監査させるための資料です。分析用の `data/ai_bundle/` とは目的が違います。こちらは、レビュー由来ルール・設定・抽出コードが複雑化していないかを棚卸しするために使います。
+このフォルダは、有報抽出パイプラインのアルゴリズムをAI/Codexに定期メンテナンスさせるための資料です。分析用の `data/ai_bundle/` とは目的が違います。こちらは、レビュー由来ルール・設定・抽出コードが複雑化していないかを棚卸しし、通常リスクの改善を実装・テストするために使います。
 
 ## 使い方
 
-1. この `data/algorithm_audit/` フォルダをAIに渡します。
-2. `ALGORITHM_AUDIT_PROMPT.md` の内容を依頼文として貼ります。
-3. AIの提案をそのまま自動反映せず、人間が妥当性を確認してから実装します。
+1. この `data/algorithm_audit/` フォルダをCodex/AIに渡します。
+2. `CODEX_MAINTENANCE_PROMPT.md` または互換用の `ALGORITHM_AUDIT_PROMPT.md` の内容を依頼文として貼ります。
+3. Codex/AIが監査、実装、テスト、差分説明まで行います。ユーザーにコード妥当性の確認を求めません。
+4. ユーザー確認が必要なのは、業務上の採用判断、破壊的なデータ削除、外部API・課金・公開範囲に影響する変更だけです。
 
 ## 同梱ファイル
 
@@ -456,7 +465,8 @@ def _readme(files: Sequence[Dict[str, Any]]) -> str:
 - 空欄は0ではありません。
 - standalone/consolidated/segment を混ぜないでください。
 - レビュー1件だけで全社共通化された候補は、まず過剰適合リスクとして疑ってください。
-- `risk_flags.csv` は機械的な赤旗です。最終判断では source_quote と対象年度を確認してください。
+- `risk_flags.csv` は機械的な赤旗です。実装判断では source_quote、対象年度、単位、スコープを確認してください。
+- `review_resolved.csv` は監査証跡です。勝手に削除・上書きしないでください。
 """
 
 

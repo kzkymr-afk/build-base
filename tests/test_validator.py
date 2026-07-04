@@ -1,5 +1,7 @@
 import unittest
+from pathlib import Path
 
+from yuho_auto_extract.io_utils import read_yaml
 from yuho_auto_extract.validator import attach_validation_status, validate_records
 
 
@@ -39,6 +41,12 @@ class ValidatorTests(unittest.TestCase):
         attached = attach_validation_status(rows, results)
         self.assertTrue(all(row["review_required"] for row in attached))
         self.assertTrue(all(row["validation_status"] == "fail" for row in attached))
+
+    def test_rd_expense_is_not_flagged_by_yoy_anomaly_config(self):
+        root = Path(__file__).resolve().parents[1]
+        rules = read_yaml(root / "config" / "validation_rules.yml")
+        yoy_fields = rules["rules"]["yoy_anomaly"]["fields_apply_to"]
+        self.assertNotIn("rd_expense", yoy_fields)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,11 @@ RULE_CANDIDATE_COLUMNS = [
     "candidate_applied_at",
     "needs_manual_check",
     "recommended_action",
+    "last_filled_delta",
+    "last_review_queue_after",
+    "last_auto_applied",
+    "last_applied_columns",
+    "last_applied_sections",
 ]
 
 RULE_CANDIDATE_DECISION_COLUMNS = [
@@ -92,6 +97,7 @@ JAPANESE_STRUCTURED_KEYS = {
 def generate_rule_candidates(root: Path) -> Dict[str, Any]:
     rows = build_rule_candidates(root)
     rows = _annotate_rule_candidate_status(root, rows)
+    rows = _attach_learning_impact(root, rows)
     path = root / "data" / "review" / "rule_candidates.csv"
     _write_rule_candidates(path, rows)
     active_rows = _filter_rule_candidates(rows, "active")
@@ -110,7 +116,30 @@ def read_rule_candidates(root: Path, candidate_status: str = "active") -> List[D
     path = root / "data" / "review" / "rule_candidates.csv"
     rows = read_table(path) if path.exists() else []
     rows = _annotate_rule_candidate_status(root, rows)
+    rows = _attach_learning_impact(root, rows)
     return _filter_rule_candidates(rows, candidate_status)
+
+
+def _attach_learning_impact(root: Path, rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    path = root / "data" / "review" / "review_learning_impact.csv"
+    if not path.exists():
+        return [dict(row) for row in rows]
+    impact_by_field = {
+        str(row.get("field_id", "") or "").strip(): row
+        for row in read_table(path)
+        if str(row.get("field_id", "") or "").strip()
+    }
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        copied = dict(row)
+        impact = impact_by_field.get(str(copied.get("field_id", "") or "").strip(), {})
+        copied["last_filled_delta"] = impact.get("filled_delta", "")
+        copied["last_review_queue_after"] = impact.get("review_queue_after", "")
+        copied["last_auto_applied"] = impact.get("auto_applied", "")
+        copied["last_applied_columns"] = impact.get("applied_columns", "")
+        copied["last_applied_sections"] = impact.get("applied_sections", "")
+        out.append(copied)
+    return out
 
 
 def rule_candidate_status_counts(root: Path) -> Dict[str, int]:
@@ -255,16 +284,12 @@ def _read_rule_candidate_decisions(root: Path) -> Dict[tuple[str, str], Dict[str
 
 def _annotate_rule_candidate_status(root: Path, rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     decisions = _read_rule_candidate_decisions(root)
-    applied_by_field: Dict[str, Dict[str, Any]] = {}
-    for (field_id, _signature), decision in decisions.items():
-        if str(decision.get("candidate_status", "")).strip().lower() == "applied":
-            applied_by_field[field_id] = decision
     annotated: List[Dict[str, Any]] = []
     for row in rows:
         copied = dict(row)
         field_id = str(copied.get("field_id", "") or "").strip()
         signature = _candidate_signature(copied)
-        decision = decisions.get((field_id, signature), applied_by_field.get(field_id, {}))
+        decision = decisions.get((field_id, signature), {})
         status = str(decision.get("candidate_status", "") or copied.get("candidate_status", "") or "active").strip()
         copied["candidate_status"] = status or "active"
         copied["candidate_applied_at"] = decision.get("candidate_applied_at", copied.get("candidate_applied_at", ""))
@@ -502,9 +527,47 @@ def _infer_from_review_value(
         _extend_unique(parsed["inference_notes"], [f"value matched in {source_type}"])
         parsed["confidences"].append(str(_context_confidence(source_type, bool(row_labels), bool(xbrl_tag))))
 
+    parsed = _merge_parsed(parsed, _infer_zero_value_review_note(row, field, labels, reviewed_value))
     if not _has_learning_signal(parsed):
         return _infer_from_saved_review_only(row, field, labels, reviewed_value)
     return {key: _unique(values) for key, values in parsed.items()}
+
+
+def _infer_zero_value_review_note(
+    row: Dict[str, Any],
+    field: Dict[str, Any],
+    labels: Sequence[str],
+    reviewed_value: Any,
+) -> Dict[str, List[str]]:
+    if _parse_numeric_value(reviewed_value) != 0:
+        return {}
+    note = unicodedata.normalize("NFKC", str(row.get("reviewer_note", "") or "")).strip()
+    if not note:
+        return {}
+    zero_markers = _zero_value_markers(note)
+    if not zero_markers:
+        return {}
+    parsed: Dict[str, List[str]] = defaultdict(list)
+    _extend_unique(parsed["row_labels"], labels)
+    _extend_unique(parsed["row_labels"], zero_markers)
+    _extend_unique(parsed["section_keywords"], _candidate_values(field.get("section_keywords", "")))
+    if "研究開発活動" in note:
+        _extend_unique(parsed["section_keywords"], ["研究開発活動"])
+    _extend_unique(parsed["scopes"], [str(field.get("data_scope_required") or row.get("data_scope") or "").strip()])
+    _extend_unique(parsed["units"], [str(field.get("target_unit") or row.get("unit_normalized") or "").strip()])
+    _extend_unique(parsed["quotes"], [_snippet_around(note, 0, min(len(note), 1))])
+    _extend_unique(parsed["learning_sources"], ["zero_value_review_note"])
+    _extend_unique(parsed["inference_notes"], ["zero value inferred from saved review note"])
+    parsed["confidences"].append("0.60")
+    return {key: _unique(values) for key, values in parsed.items()}
+
+
+def _zero_value_markers(text: str) -> List[str]:
+    markers: List[str] = []
+    for marker in ["特記事項なし", "該当事項なし", "該当なし", "なし"]:
+        if marker in text:
+            markers.append(marker)
+    return markers
 
 
 def _infer_from_saved_review_only(
@@ -571,25 +634,29 @@ def _add_evidence(group: MutableMapping[str, Any], row: Dict[str, Any], parsed: 
     _extend_unique(group["inference_notes"], parsed.get("inference_notes", []))
     group["confidence_scores"].extend(_numeric_confidences(parsed.get("confidences", [])))
     value = _reviewed_value(row)
-    if value:
+    if not is_blankish(value):
         _extend_unique(group["reviewed_values"], [value])
 
 
 def _finalize_group(group: Dict[str, Any]) -> Dict[str, Any]:
+    field_id = str(group["field_id"])
+    section_keywords = _sanitize_candidate_values(field_id, "section_keywords", group["section_keywords"])
+    tables = _sanitize_candidate_values(field_id, "tables", group["tables"])
+    row_labels = _sanitize_candidate_values(field_id, "row_labels", group["row_labels"])
     evidence_count = int(group["evidence_count"])
     generality = _generality(group["generalities"], group["company_year_ids"])
     confidence = _group_confidence(group)
-    needs_manual_check = "yes" if confidence != "high" or not (group["row_labels"] or group["xbrl_tags"]) else "no"
-    recommended_action = _recommended_action(group)
+    needs_manual_check = "yes" if confidence != "high" or not (row_labels or group["xbrl_tags"]) else "no"
+    recommended_action = _recommended_action({**group, "section_keywords": section_keywords, "tables": tables, "row_labels": row_labels})
     return {
-        "field_id": group["field_id"],
+        "field_id": field_id,
         "field_name_ja": group["field_name_ja"],
         "evidence_count": str(evidence_count),
         "company_year_ids": ";".join(group["company_year_ids"]),
         "proposed_xbrl_tags": ";".join(group["xbrl_tags"]),
-        "proposed_section_keywords": ";".join(group["section_keywords"]),
-        "proposed_tables": ";".join(group["tables"]),
-        "proposed_row_labels": ";".join(group["row_labels"]),
+        "proposed_section_keywords": ";".join(section_keywords),
+        "proposed_tables": ";".join(tables),
+        "proposed_row_labels": ";".join(row_labels),
         "proposed_scope": ";".join(group["scopes"]),
         "proposed_unit": ";".join(group["units"]),
         "generality": generality,
@@ -601,6 +668,17 @@ def _finalize_group(group: Dict[str, Any]) -> Dict[str, Any]:
         "needs_manual_check": needs_manual_check,
         "recommended_action": recommended_action,
     }
+
+
+def _sanitize_candidate_values(field_id: str, kind: str, values: Sequence[str]) -> List[str]:
+    cleaned = _unique([str(value).strip() for value in values if str(value).strip()])
+    if field_id != "rd_expense":
+        return cleaned
+    if kind == "section_keywords":
+        return [value for value in cleaned if "研究開発" in value]
+    if kind in {"tables", "row_labels"}:
+        return [value for value in cleaned if "研究開発費" in value]
+    return cleaned
 
 
 def _add_structured_value(parsed: MutableMapping[str, List[str]], key: str, value: str) -> None:
@@ -917,6 +995,7 @@ def _recommended_action(group: Dict[str, Any]) -> str:
 
 def _apply_candidate_to_field(field_row: Dict[str, Any], candidate: Dict[str, Any]) -> List[str]:
     changed_columns: List[str] = []
+    field_id = str(candidate.get("field_id", "") or "").strip()
     mapping = {
         "xbrl_tag_candidates": _xbrl_tag_values(candidate.get("proposed_xbrl_tags", "")),
         "section_keywords": _candidate_values(candidate.get("proposed_section_keywords", "")),
@@ -925,6 +1004,14 @@ def _apply_candidate_to_field(field_row: Dict[str, Any], candidate: Dict[str, An
     for column, additions in mapping.items():
         if _merge_semicolon_cell(field_row, column, additions):
             changed_columns.append(column)
+    for column, kind in {"section_keywords": "section_keywords", "synonyms_ja": "row_labels"}.items():
+        cleaned = _sanitize_candidate_values(field_id, kind, _candidate_values(field_row.get(column, "")))
+        before = str(field_row.get(column, "") or "")
+        after = ";".join(cleaned)
+        if after != before:
+            field_row[column] = after
+            if column not in changed_columns:
+                changed_columns.append(column)
     return changed_columns
 
 
@@ -957,10 +1044,39 @@ def _apply_candidate_to_sections(sections: Dict[str, Any], candidate: Dict[str, 
     changed |= _merge_yaml_list_map(section, "review_row_labels_by_field", field_id, row_labels)
     changed |= _merge_yaml_scalar_map(section, "review_units_by_field", field_id, _candidate_values(candidate.get("proposed_unit", "")))
     changed |= _merge_yaml_list(section, "target_fields", [field_id])
+    changed |= _sanitize_section_for_field(section, field_id)
     if changed or section_name not in sections:
         sections[section_name] = section
         return section_name, True
     return section_name, False
+
+
+def _sanitize_section_for_field(section: Dict[str, Any], field_id: str) -> bool:
+    if field_id != "rd_expense":
+        return False
+    changed = False
+    for key, kind in {
+        "heading_keywords": "section_keywords",
+        "table_keywords": "row_labels",
+        "review_table_keywords": "row_labels",
+        "review_row_labels": "row_labels",
+    }.items():
+        before = section.get(key, [])
+        before_list = before if isinstance(before, list) else _candidate_values(str(before))
+        after = _sanitize_candidate_values(field_id, kind, before_list)
+        if after != before_list:
+            section[key] = after
+            changed = True
+    by_field = section.get("review_row_labels_by_field", {})
+    if isinstance(by_field, dict):
+        before = by_field.get(field_id, [])
+        before_list = before if isinstance(before, list) else _candidate_values(str(before))
+        after = _sanitize_candidate_values(field_id, "row_labels", before_list)
+        if after != before_list:
+            by_field[field_id] = after
+            section["review_row_labels_by_field"] = by_field
+            changed = True
+    return changed
 
 
 def _merge_yaml_list(section: Dict[str, Any], key: str, additions: Sequence[str]) -> bool:

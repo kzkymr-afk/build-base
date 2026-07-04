@@ -9,6 +9,18 @@ rules:
     tolerance_pct: 0.01
     tolerance_abs: 10
 
+  gross_profit_identity_standalone:
+    description: 完成工事高＝完成工事総利益＋工事原価内訳（単独）
+    left: construction_revenue_standalone
+    right_sum:
+      - construction_gross_profit_standalone
+      - cost_materials
+      - cost_labor
+      - cost_subcontract
+      - cost_expense
+    tolerance_pct: 0.01
+    tolerance_abs: 10
+
   backlog_equation:
     description: 繰越高の整合性
     formula: previous_backlog + current_orders - completed_work ~= next_backlog
@@ -40,5 +52,21 @@ rules:
       - segment_orders_overseas_building
       - segment_orders_overseas_civil
       - segment_orders_overseas_construction
-      - rd_expense
       - advertising_expense
+
+# BuildBase P2: 証拠ベース自動確定ポリシー。
+# rules: と並ぶ兄弟キー。corroboration_policy.py / services/semantics_corroborate.py
+# が cfg.validation_rules.get("corroboration") で読む。
+corroboration:
+  auto_confirm_min_independent: 2
+  single_source_ok_methods:
+    - MANUAL_OBSIDIAN
+  critical_fields_require_two:
+    - building_orders_total
+    - completed_building
+    - backlog_building_next
+  conflict_forces_review: true
+  restatement_tolerance_pct: 0.05
+  # false にすると review_queue.py の証拠ベース降格ロジックを完全に無効化する
+  # 安全スイッチ。既存挙動（降格なし）に即座に戻せる。
+  enable_review_downgrade: true

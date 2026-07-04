@@ -135,7 +135,10 @@ class AIBundleTests(unittest.TestCase):
             risk_flags = read_table(audit_dir / "risk_flags.csv")
 
             self.assertTrue((audit_dir / "ALGORITHM_AUDIT_PROMPT.md").exists())
+            self.assertTrue((audit_dir / "CODEX_MAINTENANCE_PROMPT.md").exists())
             self.assertIn("レビュー由来のルール追加", result["prompt"])
+            self.assertIn("コード妥当性の確認をユーザーに求めず", result["prompt"])
+            self.assertIn("実装、テスト、差分説明", result["prompt"])
             self.assertGreaterEqual(result["summary"]["risk_flags"], 3)
             self.assertTrue(any(row["issue"] == "single_evidence_global_rule" for row in risk_flags))
             self.assertTrue(any(row["issue"] == "saved_review_not_applied" for row in risk_flags))

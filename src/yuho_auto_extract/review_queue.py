@@ -40,12 +40,29 @@ REVIEW_COLUMNS = [
 ]
 
 
+# resolution -> "corroboration_auto_confirmed" によって降格できる既存reason値。
+# 値レベルの不一致・恒等式違反を示す reason はここに含めない（安全弁）。
+_DEMOTABLE_REASONS = {"confidence_below_threshold", "unit_unknown"}
+
+# cell_resolutions の resolution 値のうち、必ずキューに残す（安全弁）べきもの。
+_FORCE_REVIEW_RESOLUTIONS = {"conflicted", "needs_review", "needs_reconciliation"}
+
+
 def build_review_queue(
     extracted_rows: Iterable[Dict[str, Any]],
     field_definitions: Iterable[Dict[str, Any]],
     company_year_master: Iterable[Dict[str, Any]],
     existing_rows: Iterable[Dict[str, Any]] = (),
+    company_field_exclusions: Iterable[Dict[str, Any]] = (),
+    cell_resolutions: Any = None,
 ) -> List[Dict[str, Any]]:
+    """review_queueを構築する。
+
+    cell_resolutions: Optional[Dict[Tuple[str, str], Dict[str, Any]]]
+      (company_year_id, field_id) -> semantics.db の cell_resolutions 行
+      （少なくとも "resolution" キーを持つ dict）。None または空辞書の場合、
+      証拠ベース降格は一切行われない（既存挙動と完全互換）。
+    """
     extracted = list(extracted_rows)
     keys_with_extracted_value = {
         (str(row.get("company_year_id", "")), str(row.get("field_id", "")))
@@ -54,17 +71,43 @@ def build_review_queue(
     }
     fields = {str(row["field_id"]): row for row in field_definitions}
     company_years = {str(row["company_year_id"]): row for row in company_year_master}
+    exclusions = [_normalized_exclusion(row) for row in company_field_exclusions]
     existing = _index_existing(existing_rows)
+    resolutions = cell_resolutions or {}
     queue: List[Dict[str, Any]] = []
     for row in extracted:
         field_id = str(row.get("field_id", ""))
         field = fields.get(field_id, {})
         company_year_id = str(row.get("company_year_id", ""))
+        company_year = company_years.get(company_year_id, {})
+        company_id = str(row.get("operating_company_id") or company_year.get("operating_company_id") or "").strip()
+        fiscal_year = row.get("fiscal_year") or company_year.get("fiscal_year")
+        if _is_excluded(company_id, field_id, fiscal_year, exclusions):
+            continue
         existing_row = existing.get((company_year_id, field_id), {})
         reasons = _review_reasons(row, field, existing_row)
+
+        # --- P2: 証拠ベース降格（保守的・ゲート付き） ---
+        # 絶対条件: conflict/needs_review/needs_reconciliation は必ずキューに残す。
+        # validation_status=='fail' の行も絶対にキューから外さない（下のreasonsに
+        # 既に "validation_fail" 等が含まれているため non_demotable として残る）。
+        resolution_entry = resolutions.get((company_year_id, field_id))
+        if resolution_entry:
+            resolution_value = str(resolution_entry.get("resolution") or "")
+            if resolution_value in _FORCE_REVIEW_RESOLUTIONS and "corroboration_conflict" not in reasons:
+                reasons = list(reasons) + ["corroboration_conflict"]
+            elif resolution_value == "auto_confirmed" and reasons:
+                non_demotable = [
+                    r for r in reasons if r not in _DEMOTABLE_REASONS and not r.startswith("validation_")
+                ]
+                validation_reasons = [r for r in reasons if r.startswith("validation_")]
+                if not non_demotable and not validation_reasons:
+                    reasons = []
+                else:
+                    reasons = non_demotable + validation_reasons
+
         if not reasons:
             continue
-        company_year = company_years.get(company_year_id, {})
         existing_value = _value(existing_row)
         extracted_value = _value(row)
         difference = None if existing_value is None or extracted_value is None else extracted_value - existing_value
@@ -72,7 +115,7 @@ def build_review_queue(
         item = {
             "company_year_id": company_year_id,
             "company_name": row.get("operating_company_name") or row.get("operating_company_id") or company_year.get("operating_company_id"),
-            "fiscal_year": row.get("fiscal_year") or company_year.get("fiscal_year"),
+            "fiscal_year": fiscal_year,
             "field_id": field_id,
             "field_name_ja": field.get("field_name_ja", ""),
             "existing_value": existing_value,
@@ -100,6 +143,41 @@ def build_review_queue(
         }
         queue.append({column: item.get(column, "") for column in REVIEW_COLUMNS})
     return _suppress_blank_candidates_when_value_exists(queue, keys_with_extracted_value)
+
+
+def _normalized_exclusion(row: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "company_id": str(row.get("company_id") or row.get("operating_company_id") or "").strip(),
+        "field_id": str(row.get("field_id") or "").strip(),
+        "start_year": _int_or_none(row.get("start_year") or row.get("from_year")),
+        "end_year": _int_or_none(row.get("end_year") or row.get("to_year")),
+    }
+
+
+def _is_excluded(company_id: str, field_id: str, fiscal_year: Any, exclusions: Iterable[Dict[str, Any]]) -> bool:
+    year = _int_or_none(fiscal_year)
+    for exclusion in exclusions:
+        if exclusion.get("company_id") != company_id or exclusion.get("field_id") != field_id:
+            continue
+        start_year = exclusion.get("start_year")
+        end_year = exclusion.get("end_year")
+        if year is None:
+            return start_year is None and end_year is None
+        if start_year is not None and year < start_year:
+            continue
+        if end_year is not None and year > end_year:
+            continue
+        return True
+    return False
+
+
+def _int_or_none(value: Any) -> Any:
+    try:
+        if value in (None, ""):
+            return None
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _review_reasons(row: Dict[str, Any], field: Dict[str, Any], existing_row: Dict[str, Any]) -> List[str]:

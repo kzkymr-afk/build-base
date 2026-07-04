@@ -1,5 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { toPng, toSvg } from 'html-to-image';
 import {
   Bar,
   BarChart,
@@ -34,6 +35,8 @@ type Page<T extends Row = Row> = {
   total: number;
   total_pages: number;
   status_counts?: RuleCandidateStatusCounts;
+  review_category_counts?: Record<string, number>;
+  review_category_labels?: Record<string, string>;
 };
 
 type Job = {
@@ -76,6 +79,13 @@ type AutomationStatus = {
     review_queue_items: number;
     resolved_reviews: number;
     blocking_reasons: string[];
+    algorithm_audit?: {
+      exists: boolean;
+      generated_at_utc: string;
+      age_days: number | null;
+      max_age_days: number;
+      stale: boolean;
+    };
   };
   company_year_roll_forward: {
     target_fiscal_year: number | null;
@@ -88,6 +98,28 @@ type AutomationStatus = {
     enabled: number;
     planned: number;
   };
+};
+
+type StockMonthlyStatus = {
+  enabled: boolean;
+  provider: string;
+  cadence: string;
+  as_of: string;
+  run_day_of_month: number;
+  due: boolean;
+  target_month: string;
+  latest_month: string;
+  last_run_at_utc: string;
+  last_status: string;
+  last_successful_month: string;
+  last_error_count: number;
+  last_ignored_listing_error_count?: number;
+  price_rows: number;
+  total_securities: number;
+  enabled_securities: number;
+  output_path: string;
+  security_master_path: string;
+  message: string;
 };
 
 type CompanyOption = {
@@ -104,6 +136,93 @@ type FieldOption = {
   label: string;
 };
 
+type FieldDefinitionRow = {
+  field_id: string;
+  field_name_ja: string;
+  category: string;
+  category_label?: string;
+  target_unit: string;
+  data_scope_required: string;
+  period_type: string;
+  preferred_method: string;
+  xbrl_tag_candidates: string;
+  context_filters: string;
+  section_keywords: string;
+  synonyms_ja: string;
+  calculation_formula: string;
+  validation_rule_ids: string;
+  review_threshold: string;
+  notes: string;
+};
+
+type FieldDefinitionResult = {
+  path: string;
+  rows: FieldDefinitionRow[];
+  columns: string[];
+  editable_columns: string[];
+  categories: Array<{ id: string; label: string }>;
+  total: number;
+  all_total: number;
+};
+
+type FieldDefinitionUpdateResult = {
+  path: string;
+  field: FieldDefinitionRow;
+  changed_columns: string[];
+  backup_path: string;
+  xlsx_written: string;
+};
+
+type XbrlDiscoveredMetricRow = Row & {
+  discovered_metric_id: string;
+  discovered_metric_label: string;
+  element_local_name: string;
+  normalized_scope: string;
+  period_bucket: string;
+  unit: string;
+  value_count: number;
+  company_year_count: number;
+  matched_field_ids: string;
+  target_field_id: string;
+  target_field_name_ja: string;
+  mapping_status: string;
+  mapping_status_label: string;
+  mapping_note: string;
+  sample_value_display: string;
+  sample_company_year_id: string;
+};
+
+type XbrlDiscoveredMetricsResult = {
+  rows: XbrlDiscoveredMetricRow[];
+  columns: string[];
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages: number;
+  field_options: Array<{ field_id: string; field_name_ja: string; category: string; target_unit: string; label: string }>;
+  status_options: Array<{ id: string; label: string }>;
+  mapping_counts: Record<string, number>;
+  mapping_path: string;
+};
+
+type XbrlMetricMappingResult = {
+  discovered_metric_id: string;
+  mapping_status: string;
+  target_field_id: string;
+  target_field_name_ja: string;
+  changed: boolean;
+  mapping_path: string;
+};
+
+type XbrlMetricBulkMappingResult = {
+  requested: number;
+  changed: number;
+  mapping_status: string;
+  target_field_id: string;
+  target_field_name_ja: string;
+  mapping_path: string;
+};
+
 type FieldPreset = {
   id: string;
   name: string;
@@ -113,6 +232,42 @@ type FieldPreset = {
 type Options = {
   companies: CompanyOption[];
   years: string[];
+  fields: FieldOption[];
+  default_result_fields: string[];
+  field_presets: FieldPreset[];
+};
+
+type StockOptions = {
+  companies: CompanyOption[];
+  months: string[];
+  fields: FieldOption[];
+  default_result_fields: string[];
+  field_presets: FieldPreset[];
+};
+
+type FactbookStatus = {
+  enabled: boolean;
+  cadence: string;
+  as_of: string;
+  source_count: number;
+  enabled_source_count: number;
+  order_rows: number;
+  parsed_order_rows: number;
+  source_documents: number;
+  unsupported_documents: number;
+  latest_fiscal_year: string;
+  last_run_at_utc: string;
+  last_status: string;
+  last_error_count: number;
+  output_path: string;
+  source_document_path: string;
+  message: string;
+};
+
+type FactbookOptions = {
+  companies: CompanyOption[];
+  years: string[];
+  category_types: string[];
   fields: FieldOption[];
   default_result_fields: string[];
   field_presets: FieldPreset[];
@@ -181,6 +336,79 @@ type AlgorithmAuditResult = {
   readme_path: string;
 };
 
+type CorroborationSummary = {
+  status?: string;
+  cells_total?: number;
+  corroborated_2plus?: number;
+  corroborated_1?: number;
+  corroborated_0?: number;
+  conflicts?: number;
+  auto_accepted_with_zero_corroboration?: number;
+  extraction_method_counts?: Record<string, number>;
+  validation_rule_status_counts?: Record<string, Record<string, number>>;
+  notes?: string[];
+};
+
+type MappingProposal = {
+  mapping_id: string;
+  action: string;
+  status: string;
+  decided_by: string;
+  decided_by_kind: string;
+  confidence: number | null;
+  rationale: string;
+  new_concept_proposal: { concept_name_ja?: string; category?: string; definition_ja?: string } | null;
+  observed_item: {
+    observed_item_id: string;
+    item_kind: string;
+    element_id: string;
+    element_local_name: string;
+    label_ja: string;
+    normalized_scope: string;
+    unit: string;
+    taxonomy_kind: string;
+    section_name: string;
+    sample_values: Record<string, unknown>;
+  };
+  concept: { concept_id: string; concept_name_ja: string; category: string; data_scope: string; target_unit: string } | null;
+  corroboration?: {
+    overlap_count: number;
+    match_count: number;
+    match_rate: number;
+    verdict: 'corroborated' | 'conflicts' | 'unverifiable' | 'weak';
+    examples: { company_year_id: string; element_value: number; concept_value: number; matched: boolean }[];
+  };
+};
+
+const CORROBORATION_VERDICT_LABELS: Record<string, string> = {
+  corroborated: '数値一致 ✓ 承認して安全',
+  conflicts: '数値不一致 ✗ 別物の可能性大（却下推奨）',
+  unverifiable: '照合不能（概念側に既存値なし）',
+  weak: '部分一致（要確認）',
+};
+
+type MappingProposalsResult = {
+  total: number;
+  action_counts: Record<string, number>;
+  proposals: MappingProposal[];
+};
+
+type AlgorithmAuditFinding = {
+  finding_id: string;
+  kind: string;
+  severity: 'high' | 'medium' | 'low' | 'info';
+  target: string;
+  evidence: Record<string, unknown>;
+  suggested_action: string;
+};
+
+type AlgorithmAuditFindingsResult = {
+  status?: string;
+  generated_at_utc?: string;
+  summary?: { total: number; by_kind: Record<string, number>; by_severity: Record<string, number> };
+  findings?: AlgorithmAuditFinding[];
+};
+
 type ChartData = {
   rows: Row[];
   columns: string[];
@@ -189,11 +417,45 @@ type ChartData = {
   fields: FieldOption[];
   companies: CompanyOption[];
   years: string[];
+  sources?: SourceSummary[];
+};
+
+type AnalysisTableData = {
+  rows: Row[];
+  columns: string[];
+  labels: Record<string, string>;
+  fieldName: string;
+  unit: string;
+};
+
+type SourceSummary = {
+  company_year_id: string;
+  company_name: string;
+  period: string;
+  field_id: string;
+  field_name: string;
+  value: string;
+  unit: string;
+  data_scope: string;
+  source_doc_id: string;
+  source_file: string;
+  source_heading: string;
+  source_quote: string;
+  extraction_method: string;
+  confidence: string;
 };
 
 type ChartKind = 'line' | 'bar' | 'combo' | 'scatter';
 type ChartMode = 'trend' | 'company';
+type ChartSource = 'financial' | 'stock' | 'factbook_orders';
+type ChartViewMode = 'chart' | 'table';
 type SeriesRenderKind = 'line' | 'bar';
+type ExportPresetId = 'wide' | 'half' | 'standard' | 'panorama';
+type ExportBackground = 'white' | 'transparent';
+type ExportMarginPreset = 'compact' | 'standard' | 'wide';
+type ExportFontScale = 'small' | 'standard' | 'large';
+type LegendPosition = 'none' | 'top' | 'bottom' | 'right';
+type DesignPreset = 'sharp' | 'report' | 'minimal';
 
 type ChartSeries = {
   key: string;
@@ -211,11 +473,30 @@ type SeriesStyle = {
   renderAs?: SeriesRenderKind;
 };
 
-const chartAspectOptions = [
-  { id: '16:9', label: '16:9 横長', ratio: 16 / 9 },
-  { id: '3:2', label: '3:2 標準', ratio: 3 / 2 },
-  { id: '4:3', label: '4:3 高め', ratio: 4 / 3 },
-  { id: '1:1', label: '1:1 正方形', ratio: 1 },
+type ExportSettings = {
+  presetId: ExportPresetId;
+  width: number;
+  height: number;
+  pixelRatio: 1 | 2 | 3;
+  background: ExportBackground;
+  marginPreset: ExportMarginPreset;
+  fontScale: ExportFontScale;
+  legendPosition: LegendPosition;
+  directLineLabels: boolean;
+  designPreset: DesignPreset;
+};
+
+type ChartRenderOptions = {
+  height: number;
+  exportMode: boolean;
+  exportSettings: ExportSettings;
+};
+
+const exportSizePresets = [
+  { id: 'wide', label: '16:9 全幅', width: 1280, height: 720 },
+  { id: 'half', label: '16:9 半幅', width: 760, height: 428 },
+  { id: 'standard', label: '4:3', width: 960, height: 720 },
+  { id: 'panorama', label: '横長', width: 1400, height: 560 },
 ] as const;
 
 const linePatternOptions = [
@@ -223,6 +504,65 @@ const linePatternOptions = [
   { id: 'dash', label: '破線', dasharray: '7 5' },
   { id: 'dot', label: '点線', dasharray: '2 4' },
 ] as const;
+
+const defaultExportSettings: ExportSettings = {
+  presetId: 'wide',
+  width: 1280,
+  height: 720,
+  pixelRatio: 2,
+  background: 'white',
+  marginPreset: 'standard',
+  fontScale: 'standard',
+  legendPosition: 'bottom',
+  directLineLabels: false,
+  designPreset: 'sharp',
+};
+
+const exportMarginPresets: Record<ExportMarginPreset, { top: number; right: number; bottom: number; left: number }> = {
+  compact: { top: 10, right: 16, bottom: 4, left: 4 },
+  standard: { top: 18, right: 28, bottom: 8, left: 8 },
+  wide: { top: 30, right: 44, bottom: 18, left: 18 },
+};
+
+const exportFontScales: Record<ExportFontScale, { tick: number; legend: number; label: number; stat: number }> = {
+  small: { tick: 11, legend: 11, label: 10, stat: 14 },
+  standard: { tick: 13, legend: 13, label: 12, stat: 16 },
+  large: { tick: 16, legend: 15, label: 14, stat: 20 },
+};
+
+const designPresets: Record<DesignPreset, {
+  label: string;
+  grid: string;
+  axis: string;
+  tick: string;
+  text: string;
+  background: string;
+}> = {
+  sharp: {
+    label: 'Sharp',
+    grid: '#e8edf3',
+    axis: '#bcc8d4',
+    tick: '#334155',
+    text: '#111827',
+    background: '#ffffff',
+  },
+  report: {
+    label: 'Report',
+    grid: '#edf1f5',
+    axis: '#cbd5df',
+    tick: '#4b5f6d',
+    text: '#1f2937',
+    background: '#ffffff',
+  },
+  minimal: {
+    label: 'Minimal',
+    grid: '#f2f5f8',
+    axis: '#d8e0e8',
+    tick: '#475569',
+    text: '#0f172a',
+    background: '#ffffff',
+  },
+};
 
 const ruleCandidateLabels: Record<string, string> = {
   field_id: 'field_id',
@@ -244,8 +584,24 @@ const ruleCandidateLabels: Record<string, string> = {
   candidate_status: '候補状態',
   candidate_applied_at: '候補反映日時',
   needs_manual_check: '要確認',
-  recommended_action: '反映先候補'
+  recommended_action: '反映先候補',
+  last_filled_delta: '前回改善',
+  last_review_queue_after: '前回レビュー残',
+  last_auto_applied: '前回自動反映',
+  last_applied_columns: '前回反映列',
+  last_applied_sections: '前回反映セクション'
 };
+
+const ruleCandidateListColumns = [
+  'field_name_ja',
+  'candidate_status',
+  'evidence_count',
+  'confidence',
+  'proposed_xbrl_tags',
+  'proposed_section_keywords',
+  'proposed_tables',
+  'recommended_action'
+];
 
 const reviewColumnLabels: Record<string, string> = {
   review_saved: '保存',
@@ -255,39 +611,200 @@ const reviewColumnLabels: Record<string, string> = {
   reviewed_at: '保存日時',
   review_decision: '判定',
   corrected_value: '修正値',
+  extracted_value: '抽出値',
+  field_name_ja: '項目',
   reviewer_note: 'メモ',
-  company_name_ja: '会社名'
+  company_name_ja: '会社名',
+  review_category: '分類',
+  review_category_label: '分類'
 };
 
-const reviewPriorityColumns = [
+const reviewListColumns = [
+  'review_category_label',
   'review_saved',
-  'applied_status',
-  'applied_value',
-  'applied_at',
-  'company_year_id',
   'company_name_ja',
   'fiscal_year',
-  'field_id',
   'field_name_ja',
-  'extracted_value',
-  'review_decision',
-  'corrected_value',
-  'review_reason',
-  'reviewer_note',
-  'reviewed_at'
+  'extracted_value'
+];
+
+const fieldDefinitionColumnLabels: Record<string, string> = {
+  field_id: '項目ID',
+  field_name_ja: '項目名',
+  category: 'ジャンル',
+  category_label: 'ジャンル',
+  target_unit: '単位',
+  data_scope_required: 'スコープ',
+  period_type: '期間',
+  preferred_method: '抽出方法',
+  synonyms_ja: '同義語',
+  xbrl_tag_candidates: '有報タグ候補',
+  context_filters: 'コンテキスト',
+  section_keywords: 'セクション語',
+  calculation_formula: '計算式',
+  validation_rule_ids: '検算',
+  review_threshold: '閾値',
+  notes: 'メモ'
+};
+
+const fieldDefinitionListColumns = [
+  'field_name_ja',
+  'category_label',
+  'target_unit',
+  'preferred_method'
+];
+
+const xbrlMetricColumnLabels: Record<string, string> = {
+  mapping_status_label: '判断',
+  target_field_name_ja: 'BuildBase項目',
+  discovered_metric_label: '有報上の項目名',
+  element_local_name: '有報タグ',
+  normalized_scope: 'スコープ',
+  period_bucket: '期間',
+  unit: '単位',
+  value_count: '値数',
+  company_year_count: '会社年度',
+  matched_field_ids: '自動推定',
+  sample_value_display: 'サンプル値',
+  sample_company_year_id: 'サンプル'
+};
+
+const stockColumnLabels: Record<string, string> = {
+  listed_company_id: '上場会社ID',
+  operating_company_id: '会社ID',
+  operating_company_name: '会社名',
+  stock_code: '証券コード',
+  ticker: 'ティッカー',
+  exchange: '市場',
+  date: '月末日',
+  month: '月',
+  fiscal_year: '年度',
+  open: '始値',
+  high: '高値',
+  low: '安値',
+  close: '終値',
+  adjusted_close: '調整後終値',
+  volume: '出来高',
+  monthly_return: '月次リターン',
+  monthly_return_pct: '月次リターン%',
+  dividend: '配当',
+  split_factor: '分割係数',
+  shares_outstanding: '発行済株式数',
+  market_cap: '時価総額',
+  currency: '通貨',
+  source: '取得元',
+  source_symbol: '取得シンボル',
+  fetched_at_utc: '取得日時'
+};
+
+const stockListColumns = [
+  'operating_company_name',
+  'month',
+  'adjusted_close',
+  'monthly_return_pct',
+  'volume',
+  'market_cap',
+  'source'
+];
+
+const factbookOrderColumnLabels: Record<string, string> = {
+  company_id: '会社ID',
+  company_name: '会社名',
+  fiscal_year: '年度',
+  fiscal_year_end: '決算日',
+  period_type: '期間種別',
+  period_label: '期間',
+  source_company_id: '資料会社ID',
+  source_doc_type: '資料種別',
+  source_dataset_id: 'データセット',
+  source_metric_id: '指標',
+  category_type: '分類種別',
+  scope: 'スコープ',
+  business_scope: '事業範囲',
+  use_category_raw: '元分類',
+  use_category_normalized: '標準分類',
+  use_category_label: '表示分類',
+  order_amount: '受注高',
+  unit: '単位',
+  amount_million_yen: '百万円換算',
+  source_url: '元URL',
+  source_page: '掲載ページ',
+  source_table_title: '表題',
+  source_quote: '引用',
+  source_file: '保存ファイル',
+  extraction_status: '抽出状態',
+  fetched_at_utc: '取得日時'
+};
+
+const factbookOrderListColumns = [
+  'company_name',
+  'fiscal_year',
+  'category_type',
+  'use_category_label',
+  'business_scope',
+  'order_amount',
+  'unit',
+  'source_doc_type',
+  'source_quote'
+];
+
+const factbookDocumentColumnLabels: Record<string, string> = {
+  source_dataset_id: 'データセット',
+  company_id: '会社ID',
+  company_name: '会社名',
+  source_doc_type: '資料種別',
+  source_metric_id: '指標',
+  category_type: '分類種別',
+  fiscal_year: '年度',
+  period_type: '期間種別',
+  period_label: '期間',
+  title: '資料名',
+  url: 'URL',
+  file_name: 'ファイル',
+  file_ext: '形式',
+  parser_status: '解析状態',
+  note: 'メモ',
+  discovered_at_utc: '発見日時'
+};
+
+const factbookDocumentListColumns = [
+  'company_name',
+  'fiscal_year',
+  'period_type',
+  'source_doc_type',
+  'title',
+  'file_ext',
+  'parser_status'
+];
+
+const auditListColumns = [
+  'value',
+  'unit_normalized',
+  'data_scope',
+  'source_heading',
+  'source_quote',
+  'extraction_method',
+  'confidence'
 ];
 
 const tabs = [
   ['run', '実行'],
   ['results', '結果'],
+  ['fields', '項目整理'],
+  ['stocks', '株価'],
+  ['factbooks', 'ファクトブック'],
   ['charts', 'グラフ'],
   ['audit', '根拠'],
   ['review', 'レビュー'],
+  ['mapping_review', 'マッピングレビュー'],
+  ['algorithm_audit_findings', 'アルゴリズム監査'],
   ['ai', 'AI分析'],
   ['report', 'レポート']
 ] as const;
 
-const APP_VERSION_FALLBACK = '0.11.0';
+const APP_VERSION_FALLBACK = '0.17.2';
+const COLLAPSED_TEXT_COLUMNS = new Set(['source_quote', 'quotes']);
+const REVIEW_CATEGORY_ORDER = ['missing', 'new_candidate', 'validation_issue', 'scope_warning', 'warning_candidate', 'saved_unapplied', 'recurrent', 'resolved_done'];
 
 const baseColumns = new Set([
   'company_year_id',
@@ -298,6 +815,12 @@ const baseColumns = new Set([
   'reporting_entity_id',
   'data_scope_allowed',
   'analysis_treatment'
+]);
+
+const resultHiddenColumns = new Set([
+  'company_year_id',
+  'operating_company_id',
+  'reporting_entity_id'
 ]);
 
 const baseColumnLabels: Record<string, string> = {
@@ -311,28 +834,15 @@ const baseColumnLabels: Record<string, string> = {
   analysis_treatment: '分析上の扱い'
 };
 
-function withPriorityColumns(columns: string[], priority: string[]): string[] {
-  const seen = new Set<string>();
-  const ordered: string[] = [];
-  for (const column of priority) {
-    if (columns.includes(column) && !seen.has(column)) {
-      ordered.push(column);
-      seen.add(column);
-    }
-  }
-  for (const column of columns) {
-    if (!seen.has(column)) {
-      ordered.push(column);
-      seen.add(column);
-    }
-  }
-  return ordered;
+function onlyExistingColumns(columns: string[], desired: string[]): string[] {
+  return desired.filter((column) => columns.includes(column));
 }
 
 function appliedStatusLabel(status: unknown): string {
   const value = String(status || '').trim();
   if (value === 'applied') return '反映済み';
   if (value === 'rejected') return '除外済み';
+  if (value === 'not_applicable') return '対象外';
   if (value === 'not_exported') return '未出力';
   if (value === 'not_found') return '対象なし';
   return '未反映';
@@ -354,12 +864,26 @@ function formatRuleCandidateGenerateMessage(result: RuleCandidateGenerateResult)
     return '候補を更新しました: 全候補0件。accept/correctで保存された正しい値と、元の根拠テキストがそろうと候補化できます。';
   }
   if (active === 0 && applied > 0) {
-    return `候補を更新しました: 未対応0件 / 対応済み${applied}件 / 全候補${all}件。新規対応は不要です。対応済みタブで履歴を確認できます。`;
+    return `候補を更新しました: 未対応0件 / 対応済み${applied}件 / 全候補${all}件。新規対応は不要です。対応済みタブに切り替えて履歴を表示します。`;
   }
   return `候補を更新しました: 未対応${active}件 / 対応済み${applied}件 / 全候補${all}件。`;
 }
 
+function nextRuleCandidateStatusAfterGenerate(result: RuleCandidateGenerateResult, currentStatus: string): string {
+  const activeCount = result.status_counts?.active ?? result.total ?? 0;
+  const appliedCount = result.status_counts?.applied ?? result.applied_total ?? 0;
+  return activeCount === 0 && appliedCount > 0 ? 'applied' : currentStatus;
+}
+
+function renderClampedText(value: unknown, className = '') {
+  const text = String(value ?? '');
+  return <span className={`clamped-cell ${className}`.trim()} title={text}>{text}</span>;
+}
+
 function renderCellValue(column: string, value: unknown) {
+  if (column === 'review_category_label') {
+    return <span className="pill pill-info">{String(value || '未分類')}</span>;
+  }
   if (column === 'review_saved') {
     const saved = String(value || '') === 'yes';
     return <span className={`pill ${saved ? 'pill-ok' : 'pill-muted'}`}>{reviewSavedLabel(value)}</span>;
@@ -372,6 +896,9 @@ function renderCellValue(column: string, value: unknown) {
   if (column === 'candidate_status') {
     const applied = String(value || '').trim() === 'applied';
     return <span className={`pill ${applied ? 'pill-ok' : 'pill-warn'}`}>{candidateStatusLabel(value)}</span>;
+  }
+  if (COLLAPSED_TEXT_COLUMNS.has(column)) {
+    return renderClampedText(value);
   }
   return String(value ?? '');
 }
@@ -405,6 +932,36 @@ function useOptions() {
   }, [options]);
 
   return { options, fieldLabels, error };
+}
+
+function useStockOptions() {
+  const [options, setOptions] = React.useState<StockOptions | null>(null);
+  const [error, setError] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    api<StockOptions>('/api/market/stock/options').then(setOptions).catch((err) => setError(String(err)));
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { options, error, refresh };
+}
+
+function useFactbookOptions() {
+  const [options, setOptions] = React.useState<FactbookOptions | null>(null);
+  const [error, setError] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    api<FactbookOptions>('/api/company-factbooks/options').then(setOptions).catch((err) => setError(String(err)));
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { options, error, refresh };
 }
 
 function App() {
@@ -474,7 +1031,7 @@ function App() {
             <p>{status?.project_root || 'プロジェクト状態を読み込み中'}</p>
           </div>
           <button className="ghost" onClick={() => { refreshStatus(); refreshJob(); }}>
-            再読込
+            全体再読込
           </button>
         </header>
         {error && (
@@ -491,11 +1048,16 @@ function App() {
             onReview={(target) => { setReviewTarget(target); setTab('review'); }}
           />
         )}
+        {tab === 'fields' && <FieldAdminPanel onUpdated={() => setDataRefreshToken((value) => value + 1)} />}
+        {tab === 'stocks' && <StocksPanel refreshToken={dataRefreshToken} />}
+        {tab === 'factbooks' && <FactbooksPanel refreshToken={dataRefreshToken} job={job} onJob={setJob} onError={setError} />}
         {tab === 'charts' && <ChartsPanel refreshToken={dataRefreshToken} />}
         {tab === 'audit' && <AuditPanel initialTarget={auditTarget} refreshToken={dataRefreshToken} />}
-        {tab === 'review' && <ReviewPanel initialTarget={reviewTarget} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
+        {tab === 'review' && <ReviewPanel initialTarget={reviewTarget} job={job} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
+        {tab === 'mapping_review' && <MappingReviewPanel onError={setError} refreshToken={dataRefreshToken} />}
+        {tab === 'algorithm_audit_findings' && <AlgorithmAuditFindingsPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'ai' && <AiPanel onError={setError} />}
-        {tab === 'report' && <ReportPanel status={status} refreshToken={dataRefreshToken} />}
+        {tab === 'report' && <ReportPanel status={status} refreshToken={dataRefreshToken} job={job} onJob={setJob} onError={setError} />}
       </main>
       <div className="version-badge" aria-label="アプリバージョン">
         v{status?.app_version || APP_VERSION_FALLBACK}
@@ -512,9 +1074,12 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
   status: Status | null;
 }) {
   const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
+  const [stockStatus, setStockStatus] = React.useState<StockMonthlyStatus | null>(null);
   const [automationLoading, setAutomationLoading] = React.useState(false);
+  const [stockLoading, setStockLoading] = React.useState(false);
   const [fiscalYear, setFiscalYear] = React.useState('');
   const [forceAnnual, setForceAnnual] = React.useState(false);
+  const jobRunning = job?.status === 'running';
 
   const refreshAutomation = React.useCallback((yearOverride?: string) => {
     setAutomationLoading(true);
@@ -539,7 +1104,28 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
     refreshAutomation();
   }, []);
 
+  const refreshStockStatus = React.useCallback(() => {
+    setStockLoading(true);
+    api<StockMonthlyStatus>('/api/market/stock/status')
+      .then(setStockStatus)
+      .catch((err) => onError(String(err)))
+      .finally(() => setStockLoading(false));
+  }, [onError]);
+
+  React.useEffect(() => {
+    refreshStockStatus();
+  }, [refreshStockStatus]);
+
+  React.useEffect(() => {
+    if (!job?.id || job.status === 'running') return;
+    refreshStockStatus();
+  }, [job?.id, job?.status, refreshStockStatus]);
+
   async function start(path: string) {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
     try {
       const next = await api<Job>(path, { method: 'POST' });
       onJob(next);
@@ -550,6 +1136,10 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
   }
 
   async function startAnnual(dryRun: boolean) {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
     const year = fiscalYear.trim() ? Number(fiscalYear.trim()) : undefined;
     if (year !== undefined && !Number.isFinite(year)) {
       onError('年度には数値を入力してください。');
@@ -570,15 +1160,36 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
     }
   }
 
+  async function startStock(dryRun: boolean) {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
+    try {
+      const next = await api<Job>('/api/jobs/stock-refresh', {
+        method: 'POST',
+        body: JSON.stringify({ force: true, dry_run: dryRun })
+      });
+      onJob(next);
+      window.setTimeout(() => {
+        onRefreshStatus();
+        refreshStockStatus();
+      }, 800);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
   return (
     <section className="stack">
       <div className="toolbar">
-        <button onClick={() => start('/api/jobs/run-all')}>一括実行</button>
-        <button onClick={() => start('/api/jobs/reextract-with-review')}>レビュー学習後に再取得</button>
-        <button onClick={() => start('/api/jobs/report')}>レポート再生成</button>
-        <button onClick={() => start('/api/jobs/algorithm-audit')}>アルゴリズム監査パック生成</button>
-        <button onClick={() => start('/api/jobs/apply-review')}>保存値を最終結果に反映</button>
+        <button onClick={() => start('/api/jobs/run-all')} disabled={jobRunning}>完成データを更新</button>
+        <button onClick={() => start('/api/jobs/reextract-with-review')} disabled={jobRunning}>保存済みレビューで再抽出</button>
+        <button onClick={() => start('/api/jobs/report')} disabled={jobRunning}>レポート更新</button>
+        <button onClick={() => start('/api/jobs/algorithm-audit')} disabled={jobRunning}>抽出ロジックを点検</button>
+        <button onClick={() => start('/api/jobs/apply-review')} disabled={jobRunning}>レビュー結果を反映</button>
       </div>
+      {jobRunning && <p className="hint action-lock">ジョブ実行中です。完了まで新しい実行操作はできません。</p>}
       <AnnualAutomationPanel
         automation={automation}
         loading={automationLoading}
@@ -592,6 +1203,27 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
         onRefresh={() => refreshAutomation()}
         onDryRun={() => startAnnual(true)}
         onRun={() => startAnnual(false)}
+        jobRunning={jobRunning}
+      />
+      <StockAutomationPanel
+        status={stockStatus}
+        loading={stockLoading}
+        onRefresh={refreshStockStatus}
+        onDryRun={() => startStock(true)}
+        onRun={() => startStock(false)}
+        jobRunning={jobRunning}
+      />
+      <MajorFinancialEvidencePanel
+        status={status}
+        onPrepare={() => start('/api/jobs/major-financial-evidence')}
+        onRefreshXbrl={() => start('/api/jobs/xbrl-fact-store')}
+        onCompare={() => start('/api/jobs/major-financial-ai-compare')}
+        jobRunning={jobRunning}
+      />
+      <XbrlDiscoveredMetricsPanel
+        status={status}
+        onBuild={() => start('/api/jobs/xbrl-discovered-metrics')}
+        jobRunning={jobRunning}
       />
       <FileHealth status={status} />
       <JobLog job={job} />
@@ -608,7 +1240,8 @@ function AnnualAutomationPanel({
   onForceAnnual,
   onRefresh,
   onDryRun,
-  onRun
+  onRun,
+  jobRunning
 }: {
   automation: AutomationStatus | null;
   loading: boolean;
@@ -619,10 +1252,12 @@ function AnnualAutomationPanel({
   onRefresh: () => void;
   onDryRun: () => void;
   onRun: () => void;
+  jobRunning: boolean;
 }) {
   const ready = automation?.review_gate.ready;
   const targetYear = automation?.target_fiscal_year ?? automation?.annual_window.target_fiscal_year ?? '';
   const blocking = automation?.review_gate.blocking_reasons || [];
+  const algorithmAudit = automation?.review_gate.algorithm_audit;
   return (
     <div className="panel automation-panel">
       <div className="panel-head">
@@ -653,6 +1288,12 @@ function AnnualAutomationPanel({
           <small>将来ソース</small>
           <strong>{automation ? `${automation.sources.enabled}/${automation.sources.total} active` : '-'}</strong>
         </div>
+        <div className="metric">
+          <small>AI監査</small>
+          <strong className={algorithmAudit?.exists && !algorithmAudit?.stale ? 'text-ok' : 'text-warn'}>
+            {algorithmAudit?.exists ? `${algorithmAudit.age_days ?? '-'}日` : '未生成'}
+          </strong>
+        </div>
       </div>
       {blocking.length > 0 && (
         <p className="hint">停止理由: {blocking.join(' / ')}</p>
@@ -666,9 +1307,259 @@ function AnnualAutomationPanel({
           <input type="checkbox" checked={forceAnnual} onChange={(e) => onForceAnnual(e.target.checked)} />
           <span>レビュー未完了でも取得</span>
         </label>
-        <button className="ghost" disabled={loading} onClick={onRefresh}>状態更新</button>
-        <button className="secondary" onClick={onDryRun}>ドライラン</button>
-        <button disabled={!forceAnnual && ready === false} onClick={onRun}>年次取得を実行</button>
+        <button className="ghost" disabled={loading} onClick={onRefresh}>年次状態更新</button>
+        <button className="secondary" onClick={onDryRun} disabled={jobRunning}>年次ドライラン</button>
+        <button disabled={jobRunning || (!forceAnnual && ready === false)} onClick={onRun}>年次取得を実行</button>
+      </div>
+    </div>
+  );
+}
+
+function StockAutomationPanel({
+  status,
+  loading,
+  onRefresh,
+  onDryRun,
+  onRun,
+  jobRunning
+}: {
+  status: StockMonthlyStatus | null;
+  loading: boolean;
+  onRefresh: () => void;
+  onDryRun: () => void;
+  onRun: () => void;
+  jobRunning: boolean;
+}) {
+  return (
+    <div className="panel automation-panel">
+      <div className="panel-head">
+        <div>
+          <h2>株価月次取得</h2>
+          <p className="muted">{status?.message || '株価取得状態を読み込み中です。'}</p>
+        </div>
+        <span className={`badge ${status?.due ? 'failed' : 'succeeded'}`}>{status?.due ? '更新必要' : '更新済み'}</span>
+      </div>
+      <div className="automation-grid">
+        <div className="metric">
+          <small>取得元</small>
+          <strong>{status?.provider || '-'}</strong>
+        </div>
+        <div className="metric">
+          <small>対象月</small>
+          <strong>{status?.target_month || '-'}</strong>
+        </div>
+        <div className="metric">
+          <small>最新月</small>
+          <strong className={status?.due ? 'text-warn' : 'text-ok'}>{status?.latest_month || '-'}</strong>
+        </div>
+        <div className="metric">
+          <small>月次行数</small>
+          <strong>{status?.price_rows ?? '-'}</strong>
+        </div>
+        <div className="metric">
+          <small>対象銘柄</small>
+          <strong>{status ? `${status.enabled_securities}/${status.total_securities}` : '-'}</strong>
+        </div>
+        <div className="metric">
+          <small>前回エラー</small>
+          <strong className={status?.last_error_count ? 'text-warn' : 'text-ok'}>
+            {status?.last_error_count ?? '-'}
+            {status?.last_ignored_listing_error_count ? `（対象外${status.last_ignored_listing_error_count}）` : ''}
+          </strong>
+        </div>
+      </div>
+      <div className="toolbar annual-toolbar">
+        <button className="ghost" disabled={loading} onClick={onRefresh}>株価状態更新</button>
+        <button className="secondary" onClick={onDryRun} disabled={jobRunning}>株価ドライラン</button>
+        <button onClick={onRun} disabled={jobRunning}>今すぐ月次株価取得</button>
+      </div>
+      <p className="hint">
+        Webアプリ起動中は毎月{status?.run_day_of_month || 5}日以降に自動チェックし、前月末までの月次OHLC・調整後終値・出来高を保存します。
+      </p>
+    </div>
+  );
+}
+
+function XbrlFactStorePanel({
+  status,
+  onRun,
+  jobRunning
+}: {
+  status: Status | null;
+  onRun: () => void;
+  jobRunning: boolean;
+}) {
+  const files = status?.files || {};
+  const manifestReady = Boolean(files.xbrl_fact_store_manifest);
+  const factsReady = Boolean(files.xbrl_fact_store_facts_json);
+  const contextReady = Boolean(files.xbrl_fact_store_context_json);
+  const digestReady = Boolean(files.xbrl_fact_store_digest);
+  const ready = manifestReady && factsReady && contextReady;
+  const message = status
+    ? ready ? '有報データの整理は完了しています。' : '有報データはまだ整理されていません。'
+    : '状態を読み込み中です。';
+
+  return (
+    <div className="panel automation-panel">
+      <div className="panel-head">
+        <div>
+          <h2>有報データ整理</h2>
+          <p className="muted">{message}</p>
+        </div>
+        <span className={`badge ${ready ? 'succeeded' : 'pending'}`}>{ready ? '生成済み' : status ? '未生成' : '確認中'}</span>
+      </div>
+      <div className="automation-grid">
+        <div className="metric">
+          <small>manifest</small>
+          <strong className={manifestReady ? 'text-ok' : 'text-warn'}>{manifestReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>有報の全データ</small>
+          <strong className={factsReady ? 'text-ok' : 'text-warn'}>{factsReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>年度・会社情報</small>
+          <strong className={contextReady ? 'text-ok' : 'text-warn'}>{contextReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>確認用メモ</small>
+          <strong className={digestReady ? 'text-ok' : 'text-warn'}>{digestReady ? 'あり' : 'なし'}</strong>
+        </div>
+      </div>
+      <div className="toolbar annual-toolbar">
+        <button onClick={onRun} disabled={jobRunning}>有報データを整理</button>
+      </div>
+    </div>
+  );
+}
+
+function MajorFinancialEvidencePanel({
+  status,
+  onPrepare,
+  onRefreshXbrl,
+  onCompare,
+  jobRunning
+}: {
+  status: Status | null;
+  onPrepare: () => void;
+  onRefreshXbrl: () => void;
+  onCompare: () => void;
+  jobRunning: boolean;
+}) {
+  const files = status?.files || {};
+  const xbrlReady = Boolean(
+    files.xbrl_fact_store_manifest
+    && files.xbrl_fact_store_facts_json
+    && files.xbrl_fact_store_context_json
+  );
+  const manifestReady = Boolean(files.major_financial_evidence_manifest);
+  const factsReady = Boolean(files.major_financial_candidate_facts);
+  const groupsReady = Boolean(files.major_financial_candidate_groups);
+  const decisionsReady = Boolean(files.major_financial_ai_decisions);
+  const compareReady = Boolean(files.major_financial_ai_compare);
+  const evidenceReady = manifestReady && factsReady && groupsReady;
+  const ready = xbrlReady && evidenceReady;
+  const message = status
+    ? ready ? '主要財務項目の候補作成は完了しています。' : '主要財務項目の候補はまだ作成されていません。'
+    : '状態を読み込み中です。';
+
+  return (
+    <div className="panel automation-panel">
+      <div className="panel-head">
+        <div>
+          <h2>主要財務項目の候補</h2>
+          <p className="muted">{message}</p>
+        </div>
+        <span className={`badge ${ready ? 'succeeded' : 'pending'}`}>{ready ? '準備済み' : status ? '未準備' : '確認中'}</span>
+      </div>
+      <div className="automation-grid">
+        <div className="metric">
+          <small>有報データ整理</small>
+          <strong className={xbrlReady ? 'text-ok' : 'text-warn'}>{xbrlReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>manifest</small>
+          <strong className={manifestReady ? 'text-ok' : 'text-warn'}>{manifestReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>候補一覧</small>
+          <strong className={factsReady ? 'text-ok' : 'text-warn'}>{factsReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>項目別候補</small>
+          <strong className={groupsReady ? 'text-ok' : 'text-warn'}>{groupsReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>AI判断メモ</small>
+          <strong className={decisionsReady ? 'text-ok' : 'text-warn'}>{decisionsReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>AI判断比較</small>
+          <strong className={compareReady ? 'text-ok' : 'text-warn'}>{compareReady ? 'あり' : 'なし'}</strong>
+        </div>
+      </div>
+      <div className="toolbar annual-toolbar">
+        <button onClick={onPrepare} disabled={jobRunning}>主要財務の候補を作る</button>
+        <button className="secondary" onClick={onRefreshXbrl} disabled={jobRunning}>有報データだけ整理</button>
+        <button className="secondary" onClick={onCompare} disabled={jobRunning || !ready || !decisionsReady}>AI判断との照合レポート</button>
+      </div>
+    </div>
+  );
+}
+
+function XbrlDiscoveredMetricsPanel({
+  status,
+  onBuild,
+  jobRunning
+}: {
+  status: Status | null;
+  onBuild: () => void;
+  jobRunning: boolean;
+}) {
+  const files = status?.files || {};
+  const xbrlReady = Boolean(
+    files.xbrl_fact_store_manifest
+    && files.xbrl_fact_store_facts_json
+    && files.xbrl_fact_store_context_json
+  );
+  const manifestReady = Boolean(files.xbrl_discovered_metrics_manifest);
+  const catalogReady = Boolean(files.xbrl_discovered_metric_catalog);
+  const valuesReady = Boolean(files.xbrl_discovered_value_long);
+  const suggestionsReady = Boolean(files.xbrl_discovered_similarity_suggestions);
+  const ready = manifestReady && catalogReady && valuesReady;
+  const message = status
+    ? ready ? '有報の全項目候補は作成済みです。' : '有報の全項目候補はまだ作成されていません。'
+    : '状態を読み込み中です。';
+
+  return (
+    <div className="panel automation-panel">
+      <div className="panel-head">
+        <div>
+          <h2>有報の全項目候補</h2>
+          <p className="muted">{message}</p>
+        </div>
+        <span className={`badge ${ready ? 'succeeded' : 'pending'}`}>{ready ? '作成済み' : status ? '未作成' : '確認中'}</span>
+      </div>
+      <div className="automation-grid">
+        <div className="metric">
+          <small>有報データ整理</small>
+          <strong className={xbrlReady ? 'text-ok' : 'text-warn'}>{xbrlReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>項目一覧</small>
+          <strong className={catalogReady ? 'text-ok' : 'text-warn'}>{catalogReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>会社・年度別の値</small>
+          <strong className={valuesReady ? 'text-ok' : 'text-warn'}>{valuesReady ? 'あり' : 'なし'}</strong>
+        </div>
+        <div className="metric">
+          <small>似た項目</small>
+          <strong className={suggestionsReady ? 'text-ok' : 'text-warn'}>{suggestionsReady ? 'あり' : 'なし'}</strong>
+        </div>
+      </div>
+      <div className="toolbar annual-toolbar">
+        <button onClick={onBuild} disabled={jobRunning}>有報の全項目候補を作る</button>
       </div>
     </div>
   );
@@ -677,22 +1568,25 @@ function AnnualAutomationPanel({
 function FileHealth({ status }: { status: Status | null }) {
   if (!status) return <Empty message="状態を読み込み中です。" />;
   return (
-    <div className="grid health-grid">
-      {Object.entries(status.files).map(([key, ok]) => (
-        <div className="metric" key={key}>
-          <small>{key}</small>
-          <strong className={ok ? 'text-ok' : 'text-warn'}>{ok ? 'あり' : 'なし'}</strong>
+    <details className="panel technical-details">
+      <summary>詳細ファイル状態</summary>
+      <div className="grid health-grid">
+        {Object.entries(status.files).map(([key, ok]) => (
+          <div className="metric" key={key}>
+            <small>{key}</small>
+            <strong className={ok ? 'text-ok' : 'text-warn'}>{ok ? 'あり' : 'なし'}</strong>
+          </div>
+        ))}
+        <div className="metric">
+          <small>AI bundle</small>
+          <strong>{status.ai_bundle_generated_at_utc || '未生成'}</strong>
         </div>
-      ))}
-      <div className="metric">
-        <small>AI bundle</small>
-        <strong>{status.ai_bundle_generated_at_utc || '未生成'}</strong>
+        <div className="metric">
+          <small>Algorithm audit</small>
+          <strong>{status.algorithm_audit_generated_at_utc || '未生成'}</strong>
+        </div>
       </div>
-      <div className="metric">
-        <small>Algorithm audit</small>
-        <strong>{status.algorithm_audit_generated_at_utc || '未生成'}</strong>
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -710,6 +1604,32 @@ function JobLog({ job }: { job: Job | null }) {
   );
 }
 
+function ReviewTerminal({ job }: { job: Job | null }) {
+  const logRef = React.useRef<HTMLPreElement | null>(null);
+
+  React.useEffect(() => {
+    const node = logRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [job?.id, job?.status, job?.logs.length]);
+
+  return (
+    <div className="panel review-terminal-panel">
+      <div className="panel-head">
+        <div>
+          <h2>作業ログ</h2>
+          <p className="muted">候補反映、再取得、最終反映の進捗をここで確認できます。</p>
+        </div>
+        <span className={`badge ${job?.status || ''}`}>{job?.status || 'idle'}</span>
+      </div>
+      {job?.error && <p className="error-text">{job.error}</p>}
+      <pre className="log review-terminal-log" ref={logRef}>
+        {job?.id ? job.logs.join('\n') || 'ログ待機中...' : 'まだジョブは実行されていません。'}
+      </pre>
+    </div>
+  );
+}
+
 function ResultsPanel({
   refreshToken,
   onAudit,
@@ -722,7 +1642,7 @@ function ResultsPanel({
   const [page, setPage] = React.useState(1);
   const [company, setCompany] = React.useState('');
   const [year, setYear] = React.useState('');
-  const [preset, setPreset] = React.useState('core');
+  const [preset, setPreset] = React.useState('all');
   const [data, setData] = React.useState<Page | null>(null);
   const [error, setError] = React.useState('');
   const [cellDetail, setCellDetail] = React.useState<CellDetail | null>(null);
@@ -743,9 +1663,10 @@ function ResultsPanel({
   }, [options, preset]);
 
   React.useEffect(() => {
+    if (!options) return;
     const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, fields: selectedFields });
     api<Page>(`/api/datasets/wide?${params}`).then(setData).catch((err) => setError(String(err)));
-  }, [page, company, year, selectedFields, refreshToken]);
+  }, [options, page, company, year, selectedFields, refreshToken]);
 
   function resetPage(next: () => void) {
     setPage(1);
@@ -801,7 +1722,7 @@ function ResultsPanel({
           </select>
         </label>
       </FilterBar>
-      <p className="hint">初期表示は最新年度の主要指標です。数値セルや空欄セルをクリックすると、根拠・レビュー候補・次の操作を確認できます。</p>
+      <p className="hint">初期表示は最新年度の全指標です。数値セルや空欄セルをクリックすると、根拠・レビュー候補・次の操作を確認できます。</p>
       {optionsError && <InlineError message={optionsError} />}
       {error && <InlineError message={error} />}
       <CellDetailPanel
@@ -815,9 +1736,10 @@ function ResultsPanel({
         <>
           <DataTable
             data={data.rows}
-            columns={data.columns}
+            columns={data.columns.filter((column) => !resultHiddenColumns.has(column))}
             columnLabels={fieldLabels}
             markEmptyCells
+            compact
             onCellClick={openCellDetail}
           />
           <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
@@ -826,6 +1748,594 @@ function ResultsPanel({
         <Empty message="結果データを読み込み中です。" />
       )}
     </section>
+  );
+}
+
+function FieldAdminPanel({ onUpdated }: { onUpdated: () => void }) {
+  const [category, setCategory] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [data, setData] = React.useState<FieldDefinitionResult | null>(null);
+  const [selected, setSelected] = React.useState<FieldDefinitionRow | null>(null);
+  const [draft, setDraft] = React.useState<Partial<FieldDefinitionRow>>({});
+  const [message, setMessage] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [termSynonyms, setTermSynonyms] = React.useState('');
+  const [termXbrlTags, setTermXbrlTags] = React.useState('');
+  const [termSections, setTermSections] = React.useState('');
+  const [termNote, setTermNote] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    const params = new URLSearchParams({ category, search });
+    api<FieldDefinitionResult>(`/api/field-definitions?${params}`)
+      .then((result) => {
+        setData(result);
+        setError('');
+        setSelected((current) => {
+          if (!current) return result.rows[0] || null;
+          return result.rows.find((row) => row.field_id === current.field_id) || result.rows[0] || null;
+        });
+      })
+      .catch((err) => setError(String(err)));
+  }, [category, search]);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  React.useEffect(() => {
+    if (!selected) {
+      setDraft({});
+      return;
+    }
+    setDraft({ ...selected });
+    setTermSynonyms('');
+    setTermXbrlTags('');
+    setTermSections('');
+    setTermNote('');
+  }, [selected]);
+
+  const columns = fieldDefinitionListColumns;
+  const selectedKey = selected?.field_id || '';
+  const selectedFieldId = selected?.field_id || '';
+
+  function setDraftValue(key: keyof FieldDefinitionRow, value: string) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveField() {
+    if (!selectedFieldId) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const updates = {
+        field_name_ja: draft.field_name_ja || '',
+        category: draft.category || '',
+        target_unit: draft.target_unit || '',
+        data_scope_required: draft.data_scope_required || '',
+        period_type: draft.period_type || '',
+        preferred_method: draft.preferred_method || '',
+        xbrl_tag_candidates: draft.xbrl_tag_candidates || '',
+        context_filters: draft.context_filters || '',
+        section_keywords: draft.section_keywords || '',
+        synonyms_ja: draft.synonyms_ja || '',
+        calculation_formula: draft.calculation_formula || '',
+        validation_rule_ids: draft.validation_rule_ids || '',
+        review_threshold: draft.review_threshold || '',
+        notes: draft.notes || '',
+      };
+      const result = await api<FieldDefinitionUpdateResult>(`/api/field-definitions/${encodeURIComponent(selectedFieldId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ updates })
+      });
+      setMessage(result.changed_columns.length ? `保存しました: ${result.changed_columns.join(', ')}。バックアップ: ${result.backup_path}` : '変更はありません。');
+      onUpdated();
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function appendTerms() {
+    if (!selectedFieldId) return;
+    const synonyms = splitTerms(termSynonyms);
+    const xbrlTags = splitTerms(termXbrlTags);
+    const sectionKeywords = splitTerms(termSections);
+    if (!synonyms.length && !xbrlTags.length && !sectionKeywords.length && !termNote.trim()) {
+      setError('追加する同義語・XBRL候補・セクション語・メモのいずれかを入力してください。');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<FieldDefinitionUpdateResult>(`/api/field-definitions/${encodeURIComponent(selectedFieldId)}/terms`, {
+        method: 'POST',
+        body: JSON.stringify({ synonyms, xbrl_tags: xbrlTags, section_keywords: sectionKeywords, note: termNote })
+      });
+      setMessage(result.changed_columns.length ? `追加しました: ${result.changed_columns.join(', ')}。` : '既存候補と同じため変更はありません。');
+      onUpdated();
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="stack">
+      <FilterBar>
+        <label className="filter-field">
+          <span>ジャンル</span>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="">全ジャンル</option>
+            {(data?.categories || []).map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>検索</span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="完成工事総利益、売上総利益、GrossProfit..." />
+        </label>
+        <button className="ghost" type="button" onClick={refresh}>項目再読込</button>
+      </FilterBar>
+      <p className="hint">項目名、同義語、有報タグ候補、セクション語をここで整理します。項目IDは最終データの主キーなので変更しません。</p>
+      {error && <InlineError message={error} />}
+      {message && <div className="alert success-alert">{message}</div>}
+      <div className="field-admin-layout">
+        <div className="panel">
+          <div className="panel-head">
+            <div>
+              <h2>項目一覧</h2>
+              <p className="muted">{data ? `${data.total} / ${data.all_total}項目` : '読み込み中'}</p>
+            </div>
+          </div>
+          {data ? (
+            <DataTable
+              data={data.rows as unknown as Row[]}
+              columns={columns}
+              columnLabels={fieldDefinitionColumnLabels}
+              onRowClick={(row) => setSelected(row as FieldDefinitionRow)}
+              selectedRowKey={selectedKey}
+              getRowKey={(row) => String(row.field_id || '')}
+              compact
+              clampAllCells
+            />
+          ) : (
+            <Empty message="項目定義を読み込み中です。" />
+          )}
+        </div>
+        <div className="panel field-editor">
+          {selected ? (
+            <>
+              <div className="panel-head">
+                <div>
+                  <h2>{selected.field_name_ja || selected.field_id}</h2>
+                  <p className="muted">項目ID: {selected.field_id}</p>
+                </div>
+                <span className="badge pending">{selected.category_label || selected.category || '未分類'}</span>
+              </div>
+              <div className="field-editor-grid">
+                <label>
+                  <span>項目名</span>
+                  <input value={draft.field_name_ja || ''} onChange={(e) => setDraftValue('field_name_ja', e.target.value)} />
+                </label>
+                <label>
+                  <span>ジャンル</span>
+                  <input value={draft.category || ''} onChange={(e) => setDraftValue('category', e.target.value)} />
+                </label>
+                <label>
+                  <span>単位</span>
+                  <input value={draft.target_unit || ''} onChange={(e) => setDraftValue('target_unit', e.target.value)} />
+                </label>
+                <label>
+                  <span>スコープ</span>
+                  <select value={draft.data_scope_required || ''} onChange={(e) => setDraftValue('data_scope_required', e.target.value)}>
+                    <option value="">未設定</option>
+                    <option value="consolidated">consolidated</option>
+                    <option value="standalone">standalone</option>
+                    <option value="segment">segment</option>
+                    <option value="permit_entity">permit_entity</option>
+                  </select>
+                </label>
+                <label>
+                  <span>期間</span>
+                  <select value={draft.period_type || ''} onChange={(e) => setDraftValue('period_type', e.target.value)}>
+                    <option value="">未設定</option>
+                    <option value="current_year">current_year</option>
+                    <option value="period_end">period_end</option>
+                    <option value="duration">duration</option>
+                  </select>
+                </label>
+                <label>
+                  <span>抽出方法</span>
+                  <select value={draft.preferred_method || ''} onChange={(e) => setDraftValue('preferred_method', e.target.value)}>
+                    <option value="">未設定</option>
+                    <option value="XBRL_CSV">XBRL_CSV</option>
+                    <option value="LOCAL_TABLE">LOCAL_TABLE</option>
+                    <option value="MANUAL_OBSIDIAN">MANUAL_OBSIDIAN</option>
+                    <option value="CALCULATED">CALCULATED</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                <span>同義語</span>
+                <textarea value={draft.synonyms_ja || ''} onChange={(e) => setDraftValue('synonyms_ja', e.target.value)} rows={3} />
+              </label>
+              <label>
+                <span>有報タグ候補</span>
+                <textarea value={draft.xbrl_tag_candidates || ''} onChange={(e) => setDraftValue('xbrl_tag_candidates', e.target.value)} rows={3} />
+              </label>
+              <label>
+                <span>セクション語</span>
+                <textarea value={draft.section_keywords || ''} onChange={(e) => setDraftValue('section_keywords', e.target.value)} rows={3} />
+              </label>
+              <label>
+                <span>コンテキスト</span>
+                <input value={draft.context_filters || ''} onChange={(e) => setDraftValue('context_filters', e.target.value)} />
+              </label>
+              <label>
+                <span>メモ</span>
+                <textarea value={draft.notes || ''} onChange={(e) => setDraftValue('notes', e.target.value)} rows={3} />
+              </label>
+              <div className="toolbar">
+                <button type="button" onClick={saveField} disabled={saving}>{saving ? '保存中...' : '項目定義を保存'}</button>
+              </div>
+              <div className="field-term-adder">
+                <h3>表記ゆれ・タグを追加</h3>
+                <div className="field-editor-grid">
+                  <label>
+                    <span>追加する同義語</span>
+                    <input value={termSynonyms} onChange={(e) => setTermSynonyms(e.target.value)} placeholder="完成工事総利益;売上総利益" />
+                  </label>
+                  <label>
+                    <span>追加する有報タグ候補</span>
+                    <input value={termXbrlTags} onChange={(e) => setTermXbrlTags(e.target.value)} placeholder="GrossProfitOnCompletedConstructionContracts" />
+                  </label>
+                  <label>
+                    <span>追加するセクション語</span>
+                    <input value={termSections} onChange={(e) => setTermSections(e.target.value)} placeholder="完成工事;売上総利益" />
+                  </label>
+                  <label>
+                    <span>追加メモ</span>
+                    <input value={termNote} onChange={(e) => setTermNote(e.target.value)} placeholder="会社別表記ゆれとして追加" />
+                  </label>
+                </div>
+                <button type="button" className="secondary" onClick={appendTerms} disabled={saving}>追加内容を保存</button>
+              </div>
+            </>
+          ) : (
+            <Empty message="編集する項目を選択してください。" />
+          )}
+        </div>
+      </div>
+      <XbrlDiscoveredMetricsMapper selectedFieldId={selectedFieldId} onUpdated={onUpdated} />
+    </section>
+  );
+}
+
+function XbrlDiscoveredMetricsMapper({
+  selectedFieldId,
+  onUpdated
+}: {
+  selectedFieldId: string;
+  onUpdated: () => void;
+}) {
+  const [search, setSearch] = React.useState('');
+  const [status, setStatus] = React.useState('');
+  const [targetFilter, setTargetFilter] = React.useState('');
+  const [page, setPage] = React.useState(1);
+  const [data, setData] = React.useState<XbrlDiscoveredMetricsResult | null>(null);
+  const [selected, setSelected] = React.useState<XbrlDiscoveredMetricRow | null>(null);
+  const [mappingTarget, setMappingTarget] = React.useState('');
+  const [mappingStatus, setMappingStatus] = React.useState('candidate');
+  const [mappingNote, setMappingNote] = React.useState('');
+  const [savingId, setSavingId] = React.useState('');
+  const [bulkSaving, setBulkSaving] = React.useState(false);
+  const [selectedMetricIds, setSelectedMetricIds] = React.useState<Set<string>>(new Set());
+  const [message, setMessage] = React.useState('');
+  const [error, setError] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: '50',
+      search,
+      mapping_status: status,
+      target_field_id: targetFilter
+    });
+    api<XbrlDiscoveredMetricsResult>(`/api/xbrl/discovered-metrics?${params}`)
+      .then((result) => {
+        setData(result);
+        setError('');
+        setSelected((current) => {
+          if (!current) return result.rows[0] || null;
+          return result.rows.find((row) => row.discovered_metric_id === current.discovered_metric_id) || result.rows[0] || null;
+        });
+      })
+      .catch((err) => setError(String(err)));
+  }, [page, search, status, targetFilter]);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  React.useEffect(() => {
+    if (!selected) {
+      setMappingTarget('');
+      setMappingStatus('candidate');
+      setMappingNote('');
+      return;
+    }
+    setMappingTarget(selected.target_field_id || selectedFieldId || firstTerm(selected.matched_field_ids));
+    setMappingStatus(selected.mapping_status === 'unmapped' ? 'candidate' : selected.mapping_status || 'candidate');
+    setMappingNote(selected.mapping_note || '');
+  }, [selected, selectedFieldId]);
+
+  async function saveMapping(nextStatus?: string) {
+    if (!selected) return;
+    const statusToSave = nextStatus || mappingStatus;
+    if ((statusToSave === 'candidate' || statusToSave === 'accepted') && !mappingTarget) {
+      setError('確認中または採用で保存する場合は、対応するBuildBase項目を選択してください。');
+      return;
+    }
+    setSavingId(selected.discovered_metric_id);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<XbrlMetricMappingResult>(
+        `/api/xbrl/discovered-metrics/${encodeURIComponent(selected.discovered_metric_id)}/mapping`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ target_field_id: mappingTarget, mapping_status: statusToSave, note: mappingNote })
+        }
+      );
+      setMessage(`${mappingStatusLabel(result.mapping_status)}として保存しました: ${result.target_field_name_ja || result.target_field_id || '対応先なし'}`);
+      onUpdated();
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSavingId('');
+    }
+  }
+
+  async function rejectSelectedMetrics() {
+    const metricIds = Array.from(selectedMetricIds);
+    if (!metricIds.length) {
+      setError('使わない項目を選択してください。');
+      return;
+    }
+    setBulkSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await api<XbrlMetricBulkMappingResult>('/api/xbrl/discovered-metrics/mappings/bulk', {
+        method: 'POST',
+        body: JSON.stringify({
+          discovered_metric_ids: metricIds,
+          mapping_status: 'rejected',
+          note: 'まとめて使わない'
+        })
+      });
+      setMessage(`${result.changed}件を「使わない」にしました。`);
+      setSelectedMetricIds(new Set());
+      onUpdated();
+      refresh();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
+  function toggleMetricSelection(row: Row) {
+    const metricId = String(row.discovered_metric_id || '');
+    if (!metricId) return;
+    setSelectedMetricIds((current) => {
+      const next = new Set(current);
+      if (next.has(metricId)) {
+        next.delete(metricId);
+      } else {
+        next.add(metricId);
+      }
+      return next;
+    });
+  }
+
+  function selectVisibleMetrics() {
+    if (!data?.rows.length) return;
+    setSelectedMetricIds((current) => {
+      const next = new Set(current);
+      for (const row of data.rows) {
+        if (row.discovered_metric_id) {
+          next.add(row.discovered_metric_id);
+        }
+      }
+      return next;
+    });
+  }
+
+  function clearMetricSelection() {
+    setSelectedMetricIds(new Set());
+  }
+
+  function updateSearch(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+
+  function updateStatus(value: string) {
+    setStatus(value);
+    setPage(1);
+  }
+
+  function updateTargetFilter(value: string) {
+    setTargetFilter(value);
+    setPage(1);
+  }
+
+  const columns = [
+    'mapping_status_label',
+    'target_field_name_ja',
+    'discovered_metric_label',
+    'element_local_name',
+    'normalized_scope',
+    'period_bucket',
+    'unit',
+    'value_count',
+    'company_year_count',
+    'matched_field_ids',
+    'sample_value_display',
+  ];
+  const counts = data?.mapping_counts || {};
+  const selectedKey = selected?.discovered_metric_id || '';
+  const selectedCount = selectedMetricIds.size;
+
+  return (
+    <div className="panel xbrl-mapper-panel">
+      <div className="panel-head">
+        <div>
+          <h2>有報から見つかった項目</h2>
+          <p className="muted">表記ゆれを、BuildBaseの項目へ結びます。</p>
+        </div>
+        <span className="badge pending">{data ? `${data.total}件` : '読み込み中'}</span>
+      </div>
+      <FilterBar>
+        <label className="filter-field">
+          <span>検索</span>
+          <input value={search} onChange={(e) => updateSearch(e.target.value)} placeholder="売上総利益、完成工事、GrossProfit..." />
+        </label>
+        <label className="filter-field small">
+          <span>状態</span>
+          <select value={status} onChange={(e) => updateStatus(e.target.value)}>
+            <option value="">全状態</option>
+            {(data?.status_options || []).map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field">
+          <span>BuildBase項目</span>
+          <select value={targetFilter} onChange={(e) => updateTargetFilter(e.target.value)}>
+            <option value="">全項目</option>
+            {(data?.field_options || []).map((field) => (
+              <option key={field.field_id} value={field.field_id}>{field.field_name_ja}</option>
+            ))}
+          </select>
+        </label>
+        <button className="ghost" type="button" onClick={refresh}>発見項目再読込</button>
+      </FilterBar>
+      <p className="hint">
+        未判断 {counts.unmapped ?? '-'} / 確認中 {counts.candidate ?? '-'} / 採用 {counts.accepted ?? '-'} / 別管理 {counts.separate ?? '-'} / 使わない {counts.rejected ?? '-'}
+      </p>
+      <div className="toolbar bulk-toolbar">
+        <span className="selection-count">選択中 {selectedCount}件</span>
+        <button type="button" className="ghost" onClick={selectVisibleMetrics} disabled={!data?.rows.length}>表示中を全選択</button>
+        <button type="button" className="ghost" onClick={clearMetricSelection} disabled={!selectedCount}>選択解除</button>
+        <button type="button" className="secondary danger-action" onClick={rejectSelectedMetrics} disabled={!selectedCount || bulkSaving}>
+          {bulkSaving ? '保存中...' : '選択をまとめて使わない'}
+        </button>
+      </div>
+      {error && <InlineError message={error} />}
+      {message && <div className="alert success-alert">{message}</div>}
+      <div className="field-admin-layout">
+        <div>
+          {data ? (
+            <>
+              <DataTable
+                data={data.rows as unknown as Row[]}
+                columns={columns}
+                columnLabels={xbrlMetricColumnLabels}
+                onRowClick={(row) => setSelected(row as XbrlDiscoveredMetricRow)}
+                selectedRowKey={selectedKey}
+                selectedRowKeys={selectedMetricIds}
+                getRowKey={(row) => String(row.discovered_metric_id || '')}
+                selectableRows
+                onRowSelectionToggle={toggleMetricSelection}
+                compact
+                clampAllCells
+              />
+              <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
+            </>
+          ) : (
+            <Empty message="有報から見つかった項目を読み込み中です。" />
+          )}
+        </div>
+        <div className="field-editor xbrl-mapping-editor">
+          {selected ? (
+            <>
+              <div className="panel-head">
+                <div>
+                  <h2>{selected.discovered_metric_label}</h2>
+                  <p className="muted">{selected.element_local_name}</p>
+                </div>
+                <span className={`badge ${selected.mapping_status === 'accepted' ? 'succeeded' : 'pending'}`}>
+                  {selected.mapping_status_label || mappingStatusLabel(selected.mapping_status)}
+                </span>
+              </div>
+              <div className="detail-grid">
+                <div>
+                  <small>会社年度数</small>
+                  <strong>{selected.company_year_count ?? '-'}</strong>
+                </div>
+                <div>
+                  <small>値数</small>
+                  <strong>{selected.value_count ?? '-'}</strong>
+                </div>
+                <div>
+                  <small>スコープ</small>
+                  <strong>{selected.normalized_scope || '-'}</strong>
+                </div>
+                <div>
+                  <small>単位</small>
+                  <strong>{selected.unit || '-'}</strong>
+                </div>
+              </div>
+              <label>
+                <span>対応するBuildBase項目</span>
+                <select value={mappingTarget} onChange={(e) => setMappingTarget(e.target.value)}>
+                  <option value="">未選択</option>
+                  {(data?.field_options || []).map((field) => (
+                    <option key={field.field_id} value={field.field_id}>{field.field_name_ja} / {field.field_id}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>判断</span>
+                <select value={mappingStatus} onChange={(e) => setMappingStatus(e.target.value)}>
+                  {(data?.status_options || []).filter((item) => item.id !== 'unmapped').map((item) => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>メモ</span>
+                <textarea value={mappingNote} onChange={(e) => setMappingNote(e.target.value)} rows={3} placeholder="表記ゆれ、統合判断、使わない理由など" />
+              </label>
+              {selected.matched_field_ids && <p className="hint">自動推定された対応先: {selected.matched_field_ids}</p>}
+              {selected.sample_value_display && <p className="hint">サンプル: {selected.sample_company_year_id} / {selected.sample_value_display}</p>}
+              <div className="toolbar">
+                <button type="button" onClick={() => saveMapping()} disabled={savingId === selected.discovered_metric_id}>
+                  {savingId === selected.discovered_metric_id ? '保存中...' : '判断を保存'}
+                </button>
+                <button type="button" className="secondary" onClick={() => saveMapping('accepted')} disabled={savingId === selected.discovered_metric_id}>この対応で採用</button>
+                <button type="button" className="ghost" onClick={() => saveMapping('separate')} disabled={savingId === selected.discovered_metric_id}>別の項目として扱う</button>
+                <button type="button" className="ghost" onClick={() => saveMapping('rejected')} disabled={savingId === selected.discovered_metric_id}>使わない</button>
+                <button type="button" className="ghost" onClick={() => saveMapping('unmapped')} disabled={savingId === selected.discovered_metric_id}>未判断に戻す</button>
+              </div>
+            </>
+          ) : (
+            <Empty message="判断する有報項目を選択してください。" />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -919,6 +2429,342 @@ function CellDetailPanel({
   );
 }
 
+function StocksPanel({ refreshToken }: { refreshToken: number }) {
+  const [page, setPage] = React.useState(1);
+  const [company, setCompany] = React.useState('');
+  const [month, setMonth] = React.useState('');
+  const [data, setData] = React.useState<Page | null>(null);
+  const [status, setStatus] = React.useState<StockMonthlyStatus | null>(null);
+  const [error, setError] = React.useState('');
+  const { options: stockOptions, error: optionsError, refresh: refreshStockOptions } = useStockOptions();
+
+  React.useEffect(() => {
+    if (!month && stockOptions?.months.length) {
+      setMonth(stockOptions.months[stockOptions.months.length - 1]);
+    }
+  }, [stockOptions, month]);
+
+  const loadStatus = React.useCallback(() => {
+    api<StockMonthlyStatus>('/api/market/stock/status').then(setStatus).catch((err) => setError(String(err)));
+  }, []);
+
+  React.useEffect(() => {
+    loadStatus();
+    refreshStockOptions();
+  }, [loadStatus, refreshStockOptions, refreshToken]);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: '50',
+      company,
+      month,
+    });
+    api<Page>(`/api/market/stock/monthly?${params}`)
+      .then((next) => {
+        setData(next);
+        setError('');
+      })
+      .catch((err) => setError(String(err)));
+  }, [page, company, month, refreshToken]);
+
+  function resetPage(next: () => void) {
+    setPage(1);
+    next();
+  }
+
+  return (
+    <section className="stack">
+      <div className="panel automation-panel">
+        <div className="panel-head">
+          <div>
+            <h2>株価月次データ</h2>
+            <p className="muted">{status?.message || '株価取得状態を読み込み中です。'}</p>
+          </div>
+          <span className={`badge ${status?.due ? 'failed' : status?.last_error_count ? 'running' : 'succeeded'}`}>
+            {status?.due ? '更新必要' : status?.last_error_count ? '一部エラー' : '更新済み'}
+          </span>
+        </div>
+        <div className="automation-grid">
+          <div className="metric">
+            <small>最新月</small>
+            <strong>{status?.latest_month || '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>行数</small>
+            <strong>{status?.price_rows ?? '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>対象銘柄</small>
+            <strong>{status ? `${status.enabled_securities}/${status.total_securities}` : '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>前回エラー</small>
+            <strong className={status?.last_error_count ? 'text-warn' : 'text-ok'}>
+              {status?.last_error_count ?? '-'}
+              {status?.last_ignored_listing_error_count ? `（対象外${status.last_ignored_listing_error_count}）` : ''}
+            </strong>
+          </div>
+          <div className="metric">
+            <small>取得元</small>
+            <strong>{status?.provider || '-'}</strong>
+          </div>
+        </div>
+      </div>
+      <FilterBar>
+        <label className="filter-field">
+          <span>会社</span>
+          <select value={company} onChange={(e) => resetPage(() => setCompany(e.target.value))}>
+            <option value="">全社</option>
+            {(stockOptions?.companies || []).map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field small">
+          <span>月</span>
+          <select value={month} onChange={(e) => resetPage(() => setMonth(e.target.value))}>
+            <option value="">全期間</option>
+            {(stockOptions?.months || []).map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </label>
+        <button className="ghost" onClick={() => { loadStatus(); refreshStockOptions(); }}>
+          株価再読込
+        </button>
+      </FilterBar>
+      <p className="hint">折れ線グラフにする場合は、グラフタブでデータ種別を「株価月次」に切り替えてください。</p>
+      {optionsError && <InlineError message={optionsError} />}
+      {error && <InlineError message={error} />}
+      {data ? (
+        <>
+          <DataTable
+            data={data.rows}
+            columns={onlyExistingColumns(data.columns, stockListColumns)}
+            columnLabels={stockColumnLabels}
+            clampAllCells
+          />
+          <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
+        </>
+      ) : (
+        <Empty message="株価データを読み込み中です。" />
+      )}
+    </section>
+  );
+}
+
+function FactbooksPanel({
+  refreshToken,
+  job,
+  onJob,
+  onError
+}: {
+  refreshToken: number;
+  job: Job | null;
+  onJob: (job: Job) => void;
+  onError: (message: string) => void;
+}) {
+  const [page, setPage] = React.useState(1);
+  const [documentPage, setDocumentPage] = React.useState(1);
+  const [company, setCompany] = React.useState('');
+  const [fiscalYear, setFiscalYear] = React.useState('');
+  const [categoryType, setCategoryType] = React.useState('');
+  const [search, setSearch] = React.useState('');
+  const [orders, setOrders] = React.useState<Page | null>(null);
+  const [documents, setDocuments] = React.useState<Page | null>(null);
+  const [status, setStatus] = React.useState<FactbookStatus | null>(null);
+  const [error, setError] = React.useState('');
+  const { options, error: optionsError, refresh: refreshOptions } = useFactbookOptions();
+  const jobRunning = job?.status === 'running';
+
+  const loadStatus = React.useCallback(() => {
+    api<FactbookStatus>('/api/company-factbooks/status').then(setStatus).catch((err) => setError(String(err)));
+  }, []);
+
+  React.useEffect(() => {
+    loadStatus();
+    refreshOptions();
+  }, [loadStatus, refreshOptions, refreshToken]);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams({
+      page: String(page),
+      page_size: '50',
+      company,
+      fiscal_year: fiscalYear,
+      category_type: categoryType,
+      search,
+    });
+    api<Page>(`/api/company-factbooks/orders?${params}`)
+      .then((next) => {
+        setOrders(next);
+        setError('');
+      })
+      .catch((err) => setError(String(err)));
+  }, [page, company, fiscalYear, categoryType, search, refreshToken]);
+
+  React.useEffect(() => {
+    const params = new URLSearchParams({
+      page: String(documentPage),
+      page_size: '50',
+      company,
+      fiscal_year: fiscalYear,
+      search,
+    });
+    api<Page>(`/api/company-factbooks/documents?${params}`)
+      .then((next) => {
+        setDocuments(next);
+        setError('');
+      })
+      .catch((err) => setError(String(err)));
+  }, [documentPage, company, fiscalYear, search, refreshToken]);
+
+  function resetPage(next: () => void) {
+    setPage(1);
+    setDocumentPage(1);
+    next();
+  }
+
+  async function startRefresh(dryRun = false) {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
+    try {
+      const next = await api<Job>('/api/jobs/factbook-refresh', {
+        method: 'POST',
+        body: JSON.stringify({ force: true, dry_run: dryRun }),
+      });
+      onJob(next);
+      window.setTimeout(() => {
+        loadStatus();
+        refreshOptions();
+      }, 800);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  return (
+    <section className="stack">
+      <div className="panel automation-panel">
+        <div className="panel-head">
+          <div>
+            <h2>ファクトブック受注カテゴリ</h2>
+            <p className="muted">{status?.message || 'ファクトブック取得状態を読み込み中です。'}</p>
+          </div>
+          <span className={`badge ${status?.last_error_count ? 'running' : status?.order_rows ? 'succeeded' : 'pending'}`}>
+            {status?.last_error_count ? '一部エラー' : status?.order_rows ? 'データあり' : '未取得'}
+          </span>
+        </div>
+        <div className="automation-grid">
+          <div className="metric">
+            <small>最新年度</small>
+            <strong>{status?.latest_fiscal_year || '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>抽出行</small>
+            <strong>{status?.order_rows ?? '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>資料候補</small>
+            <strong>{status?.source_documents ?? '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>未解析資料</small>
+            <strong className={status?.unsupported_documents ? 'text-warn' : 'text-ok'}>{status?.unsupported_documents ?? '-'}</strong>
+          </div>
+          <div className="metric">
+            <small>対象ソース</small>
+            <strong>{status ? `${status.enabled_source_count}/${status.source_count}` : '-'}</strong>
+          </div>
+        </div>
+        <div className="inline-actions">
+          <button onClick={() => startRefresh(false)} disabled={jobRunning}>公式ソースを取得</button>
+          <button className="ghost" onClick={() => startRefresh(true)} disabled={jobRunning}>取得ドライラン</button>
+          <button className="ghost" onClick={() => { loadStatus(); refreshOptions(); }} disabled={jobRunning}>ファクトブック再読込</button>
+        </div>
+      </div>
+      <FilterBar>
+        <label className="filter-field">
+          <span>会社</span>
+          <select value={company} onChange={(e) => resetPage(() => setCompany(e.target.value))}>
+            <option value="">全社</option>
+            {(options?.companies || []).map((item) => (
+              <option key={item.id} value={item.id}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field small">
+          <span>年度</span>
+          <select value={fiscalYear} onChange={(e) => resetPage(() => setFiscalYear(e.target.value))}>
+            <option value="">全年度</option>
+            {(options?.years || []).map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </label>
+        <label className="filter-field small">
+          <span>分類</span>
+          <select value={categoryType} onChange={(e) => resetPage(() => setCategoryType(e.target.value))}>
+            <option value="">全分類</option>
+            {(options?.category_types || []).map((item) => (
+              <option key={item} value={item}>{factbookCategoryTypeLabel(item)}</option>
+            ))}
+          </select>
+        </label>
+        <input value={search} onChange={(e) => resetPage(() => setSearch(e.target.value))} placeholder="分類・資料名・URLを検索" />
+      </FilterBar>
+      <p className="hint">用途別は `category_type=use`、清水の建築/土木等の区分は `business_scope` として分けて保存します。グラフタブではデータ種別を「ファクトブック受注」に切り替えてください。</p>
+      {optionsError && <InlineError message={optionsError} />}
+      {error && <InlineError message={error} />}
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>抽出済みカテゴリ</h2>
+            <p className="muted">{orders ? `${orders.total}件` : '読み込み中です。'}</p>
+          </div>
+        </div>
+        {orders ? (
+          <>
+            <DataTable
+              data={orders.rows}
+              columns={onlyExistingColumns(orders.columns, factbookOrderListColumns)}
+              columnLabels={factbookOrderColumnLabels}
+              clampAllCells
+            />
+            <Pager page={orders.page} totalPages={orders.total_pages} total={orders.total} onPage={setPage} itemLabel="カテゴリ" />
+          </>
+        ) : (
+          <Empty message="ファクトブック由来データを読み込み中です。" />
+        )}
+      </div>
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>発見済み資料</h2>
+            <p className="muted">{documents ? `${documents.total}件` : '読み込み中です。'}</p>
+          </div>
+        </div>
+        {documents ? (
+          <>
+            <DataTable
+              data={documents.rows}
+              columns={onlyExistingColumns(documents.columns, factbookDocumentListColumns)}
+              columnLabels={factbookDocumentColumnLabels}
+              clampAllCells
+            />
+            <Pager page={documents.page} totalPages={documents.total_pages} total={documents.total} onPage={setDocumentPage} itemLabel="資料" />
+          </>
+        ) : (
+          <Empty message="公式資料候補を読み込み中です。" />
+        )}
+      </div>
+    </section>
+  );
+}
+
 function AuditPanel({
   initialTarget,
   refreshToken
@@ -960,7 +2806,12 @@ function AuditPanel({
       </FilterBar>
       {data ? (
         <>
-          <DataTable data={data.rows} columns={data.columns} />
+          <DataTable
+            data={data.rows}
+            columns={onlyExistingColumns(data.columns, auditListColumns)}
+            columnLabels={{ ...baseColumnLabels, ...sourceSummaryColumnLabels }}
+            clampAllCells
+          />
           <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
         </>
       ) : (
@@ -972,11 +2823,13 @@ function AuditPanel({
 
 function ReviewPanel({
   initialTarget,
+  job,
   onJob,
   onError,
   refreshToken
 }: {
   initialTarget: ReviewTarget | null;
+  job: Job | null;
   onJob: (job: Job) => void;
   onError: (message: string) => void;
   refreshToken: number;
@@ -993,16 +2846,20 @@ function ReviewPanel({
   const [fieldId, setFieldId] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [reviewStatus, setReviewStatus] = React.useState('active');
+  const [reviewCategory, setReviewCategory] = React.useState('');
   const [data, setData] = React.useState<Page | null>(null);
   const [selected, setSelected] = React.useState<Row | null>(null);
   const [decision, setDecision] = React.useState('accept');
   const [correctedValue, setCorrectedValue] = React.useState('');
   const [note, setNote] = React.useState('');
+  const [notApplicableScope, setNotApplicableScope] = React.useState('from_selected_year');
   const [message, setMessage] = React.useState('');
   const [panelError, setPanelError] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
+  const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
+  const [automationError, setAutomationError] = React.useState('');
   const [ruleCandidates, setRuleCandidates] = React.useState<Page | null>(null);
   const [ruleCandidateStatus, setRuleCandidateStatus] = React.useState('active');
   const [ruleMessage, setRuleMessage] = React.useState('');
@@ -1011,6 +2868,7 @@ function ReviewPanel({
   const editorRef = React.useRef<HTMLElement | null>(null);
   const autoSelectedTargetRef = React.useRef('');
   const { options, fieldLabels } = useOptions();
+  const jobRunning = job?.status === 'running';
 
   React.useEffect(() => {
     if (!initialTarget) return;
@@ -1020,6 +2878,7 @@ function ReviewPanel({
     setFieldId(initialTarget.field_id);
     setSearch('');
     setReviewStatus('');
+    setReviewCategory('');
     autoSelectedTargetRef.current = '';
   }, [initialTarget]);
 
@@ -1033,7 +2892,8 @@ function ReviewPanel({
       fiscal_year: year,
       field_id: fieldId,
       search,
-      review_status: reviewStatus
+      review_status: reviewStatus,
+      review_category: reviewCategory
     });
     api<Page>(`/api/reviews/queue?${params}`)
       .then((next) => {
@@ -1045,9 +2905,22 @@ function ReviewPanel({
     return () => {
       active = false;
     };
-  }, [page, company, year, fieldId, search, reviewStatus, onError, refreshToken]);
+  }, [page, company, year, fieldId, search, reviewStatus, reviewCategory, onError, refreshToken]);
 
   React.useEffect(() => loadReviewQueue(), [loadReviewQueue]);
+
+  const loadAutomationStatus = React.useCallback(() => {
+    api<AutomationStatus>('/api/automation/status')
+      .then((next) => {
+        setAutomation(next);
+        setAutomationError('');
+      })
+      .catch((err) => setAutomationError(String(err)));
+  }, [refreshToken]);
+
+  React.useEffect(() => {
+    loadAutomationStatus();
+  }, [loadAutomationStatus]);
 
   const loadRuleCandidates = React.useCallback((statusOverride?: string) => {
     const status = statusOverride ?? ruleCandidateStatus;
@@ -1102,6 +2975,10 @@ function ReviewPanel({
 
   async function save() {
     if (!selected) return;
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。作業ログの完了を待ってから保存してください。');
+      return;
+    }
     const extractedValue = String(selected.extracted_value || '').trim();
     if (decision === 'accept' && !extractedValue) {
       setPanelError('抽出値が空のため accept では保存できません。correct を選び、修正値を入力してください。');
@@ -1127,14 +3004,19 @@ function ReviewPanel({
       });
       try {
         const candidateResult = await api<RuleCandidateGenerateResult>('/api/reviews/rule-candidates/generate', { method: 'POST' });
+        const nextStatus = nextRuleCandidateStatusAfterGenerate(candidateResult, ruleCandidateStatus);
         setRuleMessage(formatRuleCandidateGenerateMessage(candidateResult));
-        loadRuleCandidates();
+        if (nextStatus !== ruleCandidateStatus) {
+          setRuleCandidateStatus(nextStatus);
+        }
+        loadRuleCandidates(nextStatus);
         setMessage(`保存しました: ${result.changed}件 / resolved合計 ${result.total}件。正しい値から学習候補も更新しました。`);
       } catch (candidateErr) {
         setRuleError(String(candidateErr));
         setMessage(`保存しました: ${result.changed}件 / resolved合計 ${result.total}件。学習候補の更新は失敗しました。`);
       }
       loadReviewQueue();
+      loadAutomationStatus();
     } catch (err) {
       setPanelError(String(err));
     } finally {
@@ -1143,12 +3025,17 @@ function ReviewPanel({
   }
 
   async function applyReview() {
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。作業ログの完了を待ってから最終反映してください。');
+      return;
+    }
     setApplying(true);
     setPanelError('');
     try {
       const next = await api<Job>('/api/jobs/apply-review', { method: 'POST' });
       onJob(next);
-      setMessage('保存済みレビューを最終結果へ反映するジョブを開始しました。');
+      setMessage('保存済みレビュー全体を最終データへ一括反映するジョブを開始しました。');
+      window.setTimeout(loadAutomationStatus, 1000);
     } catch (err) {
       setPanelError(String(err));
     } finally {
@@ -1156,8 +3043,59 @@ function ReviewPanel({
     }
   }
 
+  async function markSelectedCompanyFieldNotApplicable() {
+    if (!selected || !selectedCompanyId) return;
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。作業ログの完了を待ってから対象外設定してください。');
+      return;
+    }
+    const fieldIdValue = String(selected.field_id || '');
+    const fieldLabel = String(selected.field_name_ja || fieldIdValue);
+    const fiscalYearValue = yearFromReviewRow(selected);
+    const range = notApplicableRange(notApplicableScope, fiscalYearValue);
+    const ok = window.confirm(`${selectedCompanyId} の${range.label}について「${fieldLabel}」を対象外として保存します。よろしいですか？`);
+    if (!ok) return;
+    setSaving(true);
+    setPanelError('');
+    try {
+      const result = await api<{
+        changed: number;
+        total: number;
+        marked: number;
+        replaced_exclusions?: number;
+        stale_not_applicable_deleted?: number;
+      }>('/api/reviews/not-applicable', {
+        method: 'POST',
+        body: JSON.stringify({
+          company_id: selectedCompanyId,
+          field_id: fieldIdValue,
+          start_year: range.startYear,
+          end_year: range.endYear,
+          note: note || `${selectedCompanyId} は持株会社等であり、この項目は同業ゼネコン比較の対象外`
+        })
+      });
+      setDecision('not_applicable');
+      setCorrectedValue('');
+      const cleanupMessage = [
+        result.replaced_exclusions ? `既存設定${result.replaced_exclusions}件を置換` : '',
+        result.stale_not_applicable_deleted ? `範囲外の古い対象外${result.stale_not_applicable_deleted}件を解除` : ''
+      ].filter(Boolean).join(' / ');
+      setMessage(`${selectedCompanyId} / ${fieldIdValue} / ${range.label} を対象外として ${result.marked}件保存しました。${cleanupMessage ? `${cleanupMessage}。` : ''}最終データへ反映するには、上部の一括反映を実行してください。`);
+      loadReviewQueue();
+      loadAutomationStatus();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function deleteReview() {
     if (!selected || !isEditingSavedReview) return;
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。作業ログの完了を待ってから削除してください。');
+      return;
+    }
     const ok = window.confirm('この保存済みレビューを削除します。review_queue.csv は残ります。');
     if (!ok) return;
     setDeleting(true);
@@ -1177,6 +3115,7 @@ function ReviewPanel({
       setNote('');
       setMessage(`削除しました: ${result.deleted}件 / resolved残り ${result.total}件`);
       loadReviewQueue();
+      loadAutomationStatus();
     } catch (err) {
       setPanelError(String(err));
     } finally {
@@ -1185,14 +3124,16 @@ function ReviewPanel({
   }
 
   async function generateRuleCandidates() {
+    if (jobRunning) {
+      setRuleError('ジョブ実行中です。作業ログの完了を待ってから候補を生成してください。');
+      return;
+    }
     setRuleLoading(true);
     setRuleError('');
     setRuleMessage('');
     try {
       const result = await api<RuleCandidateGenerateResult>('/api/reviews/rule-candidates/generate', { method: 'POST' });
-      const activeCount = result.status_counts?.active ?? result.total ?? 0;
-      const appliedCount = result.status_counts?.applied ?? result.applied_total ?? 0;
-      const nextStatus = activeCount === 0 && appliedCount > 0 ? 'applied' : ruleCandidateStatus;
+      const nextStatus = nextRuleCandidateStatusAfterGenerate(result, ruleCandidateStatus);
       setRuleMessage(formatRuleCandidateGenerateMessage(result));
       if (nextStatus !== ruleCandidateStatus) {
         setRuleCandidateStatus(nextStatus);
@@ -1207,11 +3148,18 @@ function ReviewPanel({
 
   const extractedValue = String(selected?.extracted_value || '').trim();
   const isEditingSavedReview = selected?.review_saved === 'yes';
+  const selectedCompanyId = selected ? companyIdFromCompanyYear(String(selected.company_year_id || '')) : '';
+  const selectedFiscalYear = selected ? yearFromReviewRow(selected) : null;
   const canSave = Boolean(selected) && !saving && !(decision === 'correct' && !correctedValue.trim()) && !(decision === 'accept' && !extractedValue);
+  const savedUnappliedReviews = automation?.review_gate.saved_unapplied_reviews ?? 0;
+  const activeReviewItems = automation?.review_gate.active_review_items ?? data?.total ?? 0;
 
   return (
     <section className="review-layout">
       <div className="stack">
+        <ReviewWorkflowGuide savedUnappliedReviews={savedUnappliedReviews} activeReviewItems={activeReviewItems} />
+        <ReviewTerminal job={job} />
+        {jobRunning && <p className="hint action-lock">ジョブ実行中です。完了まで保存・候補反映・再取得・最終反映はできません。</p>}
         <div className="filter-bar review-filter-bar">
           <label className="filter-field">
             <span>会社</span>
@@ -1273,22 +3221,56 @@ function ReviewPanel({
           onGenerate={generateRuleCandidates}
           onReload={loadRuleCandidates}
           onJob={onJob}
+          jobRunning={jobRunning}
         />
+        <ReviewCategorySummary
+          data={data}
+          currentCategory={reviewCategory}
+          onCategory={(category) => {
+            setPage(1);
+            setReviewCategory((current) => current === category ? '' : category);
+          }}
+        />
+        <div className="panel review-batch-panel">
+          <div>
+            <h2>3. 最終データへ一括反映</h2>
+            <p className="muted">保存済みレビュー全体を final_master、分析データ、レポートへ反映します。レビューと再取得結果を確認してから押します。</p>
+          </div>
+          <div className="review-batch-metrics">
+            <div className="metric compact">
+              <small>未反映レビュー</small>
+              <strong className={savedUnappliedReviews ? 'text-warn' : 'text-ok'}>{automation ? savedUnappliedReviews : '-'}</strong>
+            </div>
+            <div className="metric compact">
+              <small>未対応レビュー</small>
+              <strong>{automation ? activeReviewItems : '-'}</strong>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={applyReview}
+            disabled={jobRunning || applying || (automation !== null && savedUnappliedReviews === 0)}
+          >
+            {applying ? '一括反映中...' : '最終データへ一括反映'}
+          </button>
+          {automationError && <InlineError message={automationError} />}
+        </div>
         {data ? (
           <div className="panel review-queue-panel">
             <div className="panel-head">
               <h2>レビュー一覧</h2>
-              <p className="muted">左端の編集ボタンで右側のレビュー編集欄に読み込みます。</p>
+              <p className="muted">行をクリックすると右側のレビュー編集欄に読み込みます。</p>
             </div>
             <DataTable
               data={data.rows}
-              columns={withPriorityColumns(data.columns, reviewPriorityColumns)}
+              columns={onlyExistingColumns(data.columns, reviewListColumns)}
               columnLabels={{ ...fieldLabels, ...reviewColumnLabels }}
               onRowClick={pick}
               selectedRowKey={selectedRowKey}
               getRowKey={reviewRowKey}
-              rowActionLabel="編集"
               compact
+              clampAllCells
             />
             <Pager page={data.page} totalPages={data.total_pages} total={data.total} onPage={setPage} />
           </div>
@@ -1297,7 +3279,7 @@ function ReviewPanel({
         )}
       </div>
       <aside className="editor" ref={editorRef}>
-        <h2>レビュー編集</h2>
+        <h2>1. レビュー編集</h2>
         {selected ? (
           <>
             <dl>
@@ -1322,21 +3304,41 @@ function ReviewPanel({
               <option value="accept">accept</option>
               <option value="correct">correct</option>
               <option value="reject">reject</option>
+              <option value="not_applicable">not_applicable（対象外）</option>
             </select>
             <label>修正値</label>
             <input value={correctedValue} onChange={(e) => setCorrectedValue(e.target.value)} disabled={decision !== 'correct'} />
             <label>メモ（任意）</label>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={5} />
-            <p className="hint">正しい値だけでも学習候補に使います。根拠やラベルが分かる場合だけメモに補足してください。</p>
+            <p className="hint">保存すると正しい値として記録され、学習候補も自動更新されます。根拠やラベルが分かる場合だけメモに補足してください。</p>
             {decision === 'correct' && !correctedValue.trim() && <p className="hint">修正値を入力すると保存できます。</p>}
             {decision === 'accept' && !extractedValue && <p className="hint">抽出値が空の行は correct で修正値を入力してください。</p>}
+            {decision === 'not_applicable' && <p className="hint">対象外は値を作らず、レビュー済みとして扱います。持株会社など項目自体が存在しない場合に使ってください。</p>}
+            {selectedCompanyId && (
+              <div className="not-applicable-scope">
+                <label>会社・項目対象外の範囲</label>
+                <select value={notApplicableScope} onChange={(e) => setNotApplicableScope(e.target.value)} disabled={saving || jobRunning}>
+                  <option value="from_selected_year">{selectedFiscalYear ? `${selectedFiscalYear}年度以降` : '選択年度以降'}</option>
+                  <option value="after_selected_year">{selectedFiscalYear ? `${selectedFiscalYear + 1}年度以降（当年を含まない）` : '選択翌年度以降'}</option>
+                  <option value="selected_year">{selectedFiscalYear ? `${selectedFiscalYear}年度のみ` : '選択年度のみ'}</option>
+                  <option value="until_selected_year">{selectedFiscalYear ? `${selectedFiscalYear}年度以前` : '選択年度以前'}</option>
+                  <option value="before_selected_year">{selectedFiscalYear ? `${selectedFiscalYear - 1}年度以前（当年を含まない）` : '選択前年度以前'}</option>
+                  <option value="all_years">全年度</option>
+                </select>
+                <p className="hint">子会社化後だけ項目が消える場合は、境目の年度を含めるなら「選択年度以降」、境目の翌年度からなら「翌年度以降」を使ってください。</p>
+              </div>
+            )}
             {panelError && <InlineError message={panelError} />}
             <div className="toolbar">
-              <button type="button" onClick={save} disabled={!canSave}>{saving ? '保存中...' : isEditingSavedReview ? '上書き保存' : '保存'}</button>
-              {isEditingSavedReview && (
-                <button type="button" className="danger" onClick={deleteReview} disabled={deleting}>{deleting ? '削除中...' : 'レビュー削除'}</button>
+              <button type="button" onClick={save} disabled={!canSave || jobRunning}>{saving ? '保存中...' : isEditingSavedReview ? '1. 上書き保存' : '1. 保存'}</button>
+              {selectedCompanyId && (
+                <button type="button" className="secondary" onClick={markSelectedCompanyFieldNotApplicable} disabled={saving || jobRunning}>
+                  会社・項目を範囲指定で対象外
+                </button>
               )}
-              <button type="button" className="secondary" onClick={applyReview} disabled={applying}>{applying ? '反映中...' : '保存値を最終結果に反映'}</button>
+              {isEditingSavedReview && (
+                <button type="button" className="danger" onClick={deleteReview} disabled={deleting || jobRunning}>{deleting ? '削除中...' : 'レビュー削除'}</button>
+              )}
             </div>
             {message && <p className="success-text">{message}</p>}
           </>
@@ -1345,6 +3347,90 @@ function ReviewPanel({
         )}
       </aside>
     </section>
+  );
+}
+
+function ReviewWorkflowGuide({
+  savedUnappliedReviews,
+  activeReviewItems
+}: {
+  savedUnappliedReviews: number;
+  activeReviewItems: number;
+}) {
+  const steps = [
+    {
+      title: '1. レビューして保存',
+      body: '怪しい値・空欄を確認し、accept / correct / reject / 対象外で保存します。',
+      meta: `${activeReviewItems}件 未対応`
+    },
+    {
+      title: '2. 候補を反映して再取得',
+      body: '保存済みレビューから作られた候補を抽出設定へ反映し、そのまま他社・他年度を再取得します。',
+      meta: '一括実行'
+    },
+    {
+      title: '3. 最終データへ一括反映',
+      body: '保存済みレビューを final_master、分析データ、レポートへ反映します。',
+      meta: `${savedUnappliedReviews}件 未反映`
+    }
+  ];
+
+  return (
+    <div className="panel review-workflow-panel">
+      <div className="panel-head">
+        <div>
+          <h2>レビュー作業の流れ</h2>
+          <p className="muted">通常は 1 から 3 の順に進めます。「候補更新」は保存時に自動で走るため、手動更新は表示が古い時だけ使います。</p>
+        </div>
+      </div>
+      <div className="review-workflow-steps">
+        {steps.map((step) => (
+          <div className="workflow-step" key={step.title}>
+            <strong>{step.title}</strong>
+            <span>{step.body}</span>
+            <small>{step.meta}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReviewCategorySummary({
+  data,
+  currentCategory,
+  onCategory
+}: {
+  data: Page | null;
+  currentCategory: string;
+  onCategory: (category: string) => void;
+}) {
+  const counts = data?.review_category_counts || {};
+  const labels = data?.review_category_labels || {};
+  const visible = REVIEW_CATEGORY_ORDER.filter((key) => counts[key] || key !== 'resolved_done');
+  if (!data) return null;
+  return (
+    <div className="panel review-category-panel">
+      <div className="panel-head">
+        <div>
+          <h2>レビュー内訳</h2>
+          <p className="muted">未対応が増えた時は、まずこの内訳で「未取得」「検算」「スコープ」「警告」のどれが残っているかを見ます。</p>
+        </div>
+      </div>
+      <div className="review-category-grid">
+        {visible.map((key) => (
+          <button
+            type="button"
+            className={`review-category-card ${key} ${currentCategory === key ? 'active' : ''}`.trim()}
+            key={key}
+            onClick={() => onCategory(key)}
+          >
+            <small>{labels[key] || key}</small>
+            <strong>{counts[key] || 0}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1357,7 +3443,8 @@ function RuleCandidatesPanel({
   onCandidateStatus,
   onGenerate,
   onReload,
-  onJob
+  onJob,
+  jobRunning
 }: {
   data: Page | null;
   loading: boolean;
@@ -1368,23 +3455,41 @@ function RuleCandidatesPanel({
   onGenerate: () => void;
   onReload: () => void;
   onJob: (job: Job) => void;
+  jobRunning: boolean;
 }) {
   const [selectedCandidate, setSelectedCandidate] = React.useState<Row | null>(null);
+  const [selectedCandidateFieldIds, setSelectedCandidateFieldIds] = React.useState<Set<string>>(() => new Set());
   const [applyMessage, setApplyMessage] = React.useState('');
   const [applyError, setApplyError] = React.useState('');
   const [applying, setApplying] = React.useState(false);
   const statusCounts = data?.status_counts;
-  const selectedCandidateApplied = String(selectedCandidate?.candidate_status || '').trim() === 'applied';
+  const activeCandidateRows = React.useMemo(
+    () => (data?.rows || []).filter((row) => String(row.candidate_status || '').trim() !== 'applied' && String(row.field_id || '').trim()),
+    [data]
+  );
+  const activeFieldIds = React.useMemo(
+    () => Array.from(new Set(activeCandidateRows.map((row) => String(row.field_id || '').trim()).filter(Boolean))),
+    [activeCandidateRows]
+  );
+  const selectedActiveFieldIds = React.useMemo(
+    () => Array.from(selectedCandidateFieldIds).filter((fieldId) => activeFieldIds.includes(fieldId)),
+    [selectedCandidateFieldIds, activeFieldIds]
+  );
 
-  async function applySelectedCandidate() {
-    if (!selectedCandidate) return;
-    if (selectedCandidateApplied) {
-      setApplyError('この候補は対応済みです。未対応候補だけ設定へ反映できます。');
+  React.useEffect(() => {
+    setSelectedCandidateFieldIds((current) => {
+      const next = new Set(Array.from(current).filter((fieldId) => activeFieldIds.includes(fieldId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [activeFieldIds]);
+
+  async function applySelectedCandidatesAndReextract() {
+    if (jobRunning) {
+      setApplyError('ジョブ実行中です。作業ログの完了を待ってから候補を反映してください。');
       return;
     }
-    const fieldId = String(selectedCandidate.field_id || '').trim();
-    if (!fieldId) {
-      setApplyError('field_id が空の候補は反映できません。');
+    if (!selectedActiveFieldIds.length) {
+      setApplyError('未対応候補を選択してください。');
       return;
     }
     setApplying(true);
@@ -1393,15 +3498,18 @@ function RuleCandidatesPanel({
     try {
       const result = await api<RuleCandidateApplyResult>('/api/reviews/rule-candidates/apply', {
         method: 'POST',
-        body: JSON.stringify({ field_ids: [fieldId] })
+        body: JSON.stringify({ field_ids: selectedActiveFieldIds })
       });
       const fieldUpdates = result.updated_fields
         .map((item) => `${item.field_id}: ${item.columns.join(', ')}`)
         .join(' / ') || '辞書変更なし';
       const sectionUpdates = result.updated_sections.join(', ') || 'セクション変更なし';
       const warningText = result.warnings.length ? ` / 注意: ${result.warnings.join(' / ')}` : '';
-      setApplyMessage(`設定へ反映しました: 候補${result.applied_candidates}件 / ${fieldUpdates} / ${sectionUpdates}${warningText}。この候補は対応済みタブに移動します。`);
+      const next = await api<Job>('/api/jobs/reextract-with-review', { method: 'POST' });
+      onJob(next);
+      setApplyMessage(`設定へ一括反映し、再取得ジョブを開始しました: 候補${result.applied_candidates}件 / ${fieldUpdates} / ${sectionUpdates}${warningText}。反映済み候補は対応済みタブに移動します。`);
       setSelectedCandidate(null);
+      setSelectedCandidateFieldIds(new Set());
       onReload();
     } catch (err) {
       setApplyError(String(err));
@@ -1411,13 +3519,17 @@ function RuleCandidatesPanel({
   }
 
   async function startReextractWithReview() {
+    if (jobRunning) {
+      setApplyError('ジョブ実行中です。作業ログの完了を待ってから再取得してください。');
+      return;
+    }
     setApplying(true);
     setApplyError('');
     setApplyMessage('');
     try {
       const next = await api<Job>('/api/jobs/reextract-with-review', { method: 'POST' });
       onJob(next);
-      setApplyMessage('レビュー学習後の再取得ジョブを開始しました。');
+      setApplyMessage('再取得だけを開始しました。直前に反映済みの設定で他社・他年度を再探索します。');
     } catch (err) {
       setApplyError(String(err));
     } finally {
@@ -1429,6 +3541,30 @@ function RuleCandidatesPanel({
     setSelectedCandidate(row);
     setApplyMessage('');
     setApplyError('');
+    const fieldId = String(row.field_id || '').trim();
+    const isApplied = String(row.candidate_status || '').trim() === 'applied';
+    if (!fieldId || isApplied) return;
+    setSelectedCandidateFieldIds((current) => {
+      const next = new Set(current);
+      if (next.has(fieldId)) {
+        next.delete(fieldId);
+      } else {
+        next.add(fieldId);
+      }
+      return next;
+    });
+  }
+
+  function selectAllActiveCandidates() {
+    setSelectedCandidateFieldIds(new Set(activeFieldIds));
+    setApplyMessage('');
+    setApplyError('');
+  }
+
+  function clearCandidateSelection() {
+    setSelectedCandidateFieldIds(new Set());
+    setApplyMessage('');
+    setApplyError('');
   }
 
   function statusTabLabel(value: 'active' | 'applied' | 'all', label: string) {
@@ -1437,7 +3573,7 @@ function RuleCandidatesPanel({
   }
 
   function emptyMessage() {
-    if (candidateStatus === 'active') return '未対応の抽出ルール候補はありません。新しい正しい値を保存して候補を更新するか、対応済みタブを確認してください。';
+    if (candidateStatus === 'active') return '未対応の抽出ルール候補はありません。新しい正しい値を保存すると候補は自動更新されます。必要なら手動で再生成してください。';
     if (candidateStatus === 'applied') return '対応済みの抽出ルール候補はありません。';
     return '抽出ルール候補はまだありません。';
   }
@@ -1445,7 +3581,7 @@ function RuleCandidatesPanel({
   return (
     <div className="panel rule-candidates">
       <div className="panel-head">
-        <h2>抽出ルール候補</h2>
+        <h2>2. 学習ルール候補と再取得</h2>
         <div className="toolbar">
           <div className="segmented-control">
             {[
@@ -1463,58 +3599,73 @@ function RuleCandidatesPanel({
               </button>
             ))}
           </div>
-          <button type="button" onClick={onGenerate} disabled={loading}>{loading ? '更新中...' : '正しい値から候補を更新'}</button>
-          <button type="button" className="ghost" onClick={onReload}>再読込</button>
+          <button type="button" onClick={onGenerate} disabled={loading || jobRunning}>{loading ? '再生成中...' : '候補を手動再生成'}</button>
+          <button type="button" className="ghost" onClick={() => onReload()}>候補再読込</button>
         </div>
       </div>
       <div className="rule-learning-flow">
         <div>
-          <strong>レビュー</strong>
-          <span>セルごとの accept / correct 判断</span>
+          <strong>1. 保存済みレビュー</strong>
+          <span>人間が確認した正しい値・対象外判断</span>
         </div>
         <div>
-          <strong>正しい値</strong>
-          <span>保存された人間確認済みの値</span>
+          <strong>2. ルール候補</strong>
+          <span>同じ項目を探すXBRLタグ・表ラベル・見出し条件</span>
         </div>
         <div>
-          <strong>ルール候補</strong>
-          <span>同じ項目を他社・他年度で探す条件案</span>
+          <strong>3. 反映して再取得</strong>
+          <span>選択候補を設定へ反映し、そのまま他社・他年度を再探索</span>
         </div>
       </div>
       {message && <p className="success-text">{message}</p>}
       {error && <InlineError message={error} />}
       <div className="candidate-action">
         <div>
-          <strong>{selectedCandidate ? String(selectedCandidate.field_name_ja || selectedCandidate.field_id) : '候補を選択'}</strong>
+          <strong>{selectedActiveFieldIds.length ? `${selectedActiveFieldIds.length}件を選択中` : selectedCandidate ? String(selectedCandidate.field_name_ja || selectedCandidate.field_id) : '候補を選択'}</strong>
           <p className="muted">
             {selectedCandidate
               ? `field_id: ${String(selectedCandidate.field_id)} / 証跡数: ${String(selectedCandidate.evidence_count || '-')} / 状態: ${candidateStatusLabel(selectedCandidate.candidate_status)}`
-              : '未対応候補を選ぶと設定へ反映できます。対応済み候補は履歴確認用です。'}
+              : '未対応候補をまとめて選び、内容が妥当なら抽出設定へ反映して、そのまま再取得します。候補の手動再生成は通常不要です。'}
           </p>
         </div>
-        <button type="button" className="secondary" onClick={applySelectedCandidate} disabled={!selectedCandidate || selectedCandidateApplied || applying}>
-          {selectedCandidateApplied ? '対応済み' : applying ? '反映中...' : '選択候補を設定へ反映'}
+        <button type="button" className="ghost" onClick={selectAllActiveCandidates} disabled={!activeFieldIds.length || applying || jobRunning}>
+          未対応を全選択
         </button>
-        <button type="button" onClick={startReextractWithReview} disabled={applying}>
-          レビュー学習後に再取得
+        <button type="button" className="ghost" onClick={clearCandidateSelection} disabled={!selectedActiveFieldIds.length || applying || jobRunning}>
+          選択解除
+        </button>
+        <button type="button" className="secondary" onClick={applySelectedCandidatesAndReextract} disabled={!selectedActiveFieldIds.length || applying || jobRunning}>
+          {applying ? '実行中...' : '2. 選択候補を反映して再取得'}
+        </button>
+        <button type="button" className="ghost" onClick={startReextractWithReview} disabled={applying || jobRunning}>
+          再取得だけ
         </button>
       </div>
       {selectedCandidate && (
         <dl className="candidate-detail">
           <dt>XBRLタグ候補</dt>
-          <dd>{String(selectedCandidate.proposed_xbrl_tags || '-')}</dd>
+          <dd>{renderClampedText(selectedCandidate.proposed_xbrl_tags || '-')}</dd>
           <dt>セクション候補</dt>
-          <dd>{String(selectedCandidate.proposed_section_keywords || '-')}</dd>
+          <dd>{renderClampedText(selectedCandidate.proposed_section_keywords || '-')}</dd>
           <dt>表・行ラベル候補</dt>
-          <dd>{[selectedCandidate.proposed_tables, selectedCandidate.proposed_row_labels].filter(Boolean).map(String).join(' / ') || '-'}</dd>
+          <dd>{renderClampedText([selectedCandidate.proposed_tables, selectedCandidate.proposed_row_labels].filter(Boolean).map(String).join(' / ') || '-')}</dd>
           <dt>信頼度</dt>
-          <dd>{String(selectedCandidate.confidence || '-')} / {String(selectedCandidate.inference_notes || '-')}</dd>
+          <dd>{renderClampedText(`${String(selectedCandidate.confidence || '-')} / ${String(selectedCandidate.inference_notes || '-')}`)}</dd>
         </dl>
       )}
       {applyMessage && <p className="success-text">{applyMessage}</p>}
       {applyError && <InlineError message={applyError} />}
       {data?.rows.length ? (
-        <DataTable data={data.rows} columns={data.columns} columnLabels={ruleCandidateLabels} onRowClick={pickCandidate} compact />
+        <DataTable
+          data={data.rows}
+          columns={onlyExistingColumns(data.columns, ruleCandidateListColumns)}
+          columnLabels={ruleCandidateLabels}
+          onRowClick={pickCandidate}
+          selectedRowKeys={selectedCandidateFieldIds}
+          getRowKey={(row) => String(row.field_id || '')}
+          compact
+          clampAllCells
+        />
       ) : (
         <Empty message={emptyMessage()} />
       )}
@@ -1632,7 +3783,7 @@ function AiPanel({ onError }: { onError: (message: string) => void }) {
         <div className="panel">
           <div className="panel-head">
             <h2>生成プロンプト</h2>
-            <button className="ghost" onClick={() => navigator.clipboard.writeText(prompt)}>コピー</button>
+            <button className="ghost" onClick={() => navigator.clipboard.writeText(prompt)}>分析プロンプトをコピー</button>
           </div>
           {references.length > 0 && <p className="muted">参照: {references.join(', ')}</p>}
           <pre className="prompt">{prompt || '条件を入力してプロンプトを生成してください。'}</pre>
@@ -1640,7 +3791,7 @@ function AiPanel({ onError }: { onError: (message: string) => void }) {
         <div className="panel">
           <div className="panel-head">
             <h2>アルゴリズム監査プロンプト</h2>
-            <button className="ghost" onClick={() => navigator.clipboard.writeText(auditPrompt)} disabled={!auditPrompt}>コピー</button>
+            <button className="ghost" onClick={() => navigator.clipboard.writeText(auditPrompt)} disabled={!auditPrompt}>監査プロンプトをコピー</button>
           </div>
           <pre className="prompt">{auditPrompt || '監査パックを生成すると、AIに渡す監査プロンプトが表示されます。'}</pre>
         </div>
@@ -1651,6 +3802,11 @@ function AiPanel({ onError }: { onError: (message: string) => void }) {
 
 function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const { options, error: optionsError } = useOptions();
+  const { options: stockOptions, error: stockOptionsError } = useStockOptions();
+  const { options: factbookOptions, error: factbookOptionsError } = useFactbookOptions();
+  const exportRef = React.useRef<HTMLDivElement>(null);
+  const [chartSource, setChartSource] = React.useState<ChartSource>('financial');
+  const [viewMode, setViewMode] = React.useState<ChartViewMode>('chart');
   const [chartKind, setChartKind] = React.useState<ChartKind>('line');
   const [mode, setMode] = React.useState<ChartMode>('trend');
   const [selectedCompanies, setSelectedCompanies] = React.useState<string[]>([]);
@@ -1661,48 +3817,66 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const [editMode, setEditMode] = React.useState(false);
   const [selectedSeriesKey, setSelectedSeriesKey] = React.useState('');
   const [seriesStyles, setSeriesStyles] = React.useState<Record<string, SeriesStyle>>({});
-  const [chartAspect, setChartAspect] = React.useState<(typeof chartAspectOptions)[number]['id']>('16:9');
+  const [exportSettings, setExportSettings] = React.useState<ExportSettings>(defaultExportSettings);
+  const [exportMessage, setExportMessage] = React.useState('');
+  const [exportError, setExportError] = React.useState('');
   const [showCorrelation, setShowCorrelation] = React.useState(false);
   const [scatterX, setScatterX] = React.useState('');
   const [scatterY, setScatterY] = React.useState('');
   const [data, setData] = React.useState<ChartData | null>(null);
   const [error, setError] = React.useState('');
 
+  const activeOptions = chartSource === 'stock' ? stockOptions : chartSource === 'factbook_orders' ? factbookOptions : options;
+  const activePeriods = chartSource === 'stock' ? stockOptions?.months || [] : chartSource === 'factbook_orders' ? factbookOptions?.years || [] : options?.years || [];
+  const activeFields = activeOptions?.fields || [];
+  const activeCompanies = activeOptions?.companies || [];
+
   React.useEffect(() => {
-    if (!options) return;
-    if (!selectedCompanies.length) {
-      setSelectedCompanies(options.companies.slice(0, 5).map((item) => item.id));
-    }
-    if (!selectedYears.length) {
-      setSelectedYears(options.years.slice(-6));
-    }
-    if (!selectedFields.length) {
-      const defaults = ['roe', 'net_sales_consolidated', 'operating_income_consolidated']
-        .filter((field) => options.fields.some((item) => item.id === field));
-      setSelectedFields(defaults.length ? defaults.slice(0, 1) : options.fields.slice(0, 1).map((item) => item.id));
-    }
-    if (!scatterX) {
-      setScatterX(options.fields.find((item) => item.id === 'net_sales_consolidated')?.id || options.fields[0]?.id || '');
-    }
-    if (!scatterY) {
-      setScatterY(options.fields.find((item) => item.id === 'roe')?.id || options.fields[1]?.id || options.fields[0]?.id || '');
-    }
-  }, [options, selectedCompanies.length, selectedYears.length, selectedFields.length, scatterX, scatterY]);
+    if (!activeOptions) return;
+    const companyIds = new Set(activeCompanies.map((item) => item.id));
+    const periodIds = new Set(activePeriods);
+    const fieldIds = new Set(activeFields.map((item) => item.id));
+    setSelectedCompanies((current) => current.filter((id) => companyIds.has(id)));
+    setSelectedYears((current) => current.filter((id) => periodIds.has(id)));
+    setSelectedFields((current) => current.filter((id) => fieldIds.has(id)));
+    setScatterX((current) => current && fieldIds.has(current) ? current : '');
+    setScatterY((current) => current && fieldIds.has(current) ? current : '');
+    setRightAxisFields((current) => current.filter((fieldId) => fieldIds.has(fieldId)));
+    setSelectedSeriesKey('');
+  }, [activeOptions, activeCompanies, activePeriods, activeFields, chartSource]);
 
   React.useEffect(() => {
     setRightAxisFields((current) => current.filter((fieldId) => selectedFields.includes(fieldId)));
   }, [selectedFields]);
 
+  React.useEffect(() => {
+    if (viewMode !== 'table') return;
+    setSelectedFields((current) => current.slice(0, 1));
+    setRightAxisFields([]);
+  }, [viewMode]);
+
   const queryFields = React.useMemo(() => {
+    if (viewMode === 'table') {
+      return selectedFields.slice(0, 1);
+    }
     if (chartKind === 'scatter') {
       return [scatterX, scatterY].filter(Boolean);
     }
     return selectedFields;
-  }, [chartKind, scatterX, scatterY, selectedFields]);
+  }, [chartKind, scatterX, scatterY, selectedFields, viewMode]);
+
+  const requiredFieldCount = viewMode === 'chart' && chartKind === 'scatter' ? 2 : 1;
+  const hasRequiredSelections = selectedCompanies.length > 0 && selectedYears.length > 0 && queryFields.length >= requiredFieldCount;
 
   React.useEffect(() => {
-    if (!options || !queryFields.length) return;
+    if (!activeOptions) return;
+    if (!hasRequiredSelections) {
+      setData(null);
+      setError('');
+      return;
+    }
     const params = new URLSearchParams({
+      source: chartSource,
       companies: selectedCompanies.join(','),
       fiscal_years: selectedYears.join(','),
       fields: queryFields.join(','),
@@ -1714,16 +3888,18 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
         setError('');
       })
       .catch((err) => setError(String(err)));
-  }, [options, selectedCompanies, selectedYears, queryFields, refreshToken]);
+  }, [activeOptions, chartSource, selectedCompanies, selectedYears, queryFields, refreshToken, hasRequiredSelections]);
 
-  if (!options) {
+  if (!options || (chartSource === 'stock' && !stockOptions) || (chartSource === 'factbook_orders' && !factbookOptions)) {
     return <Empty message="グラフ設定を読み込み中です。" />;
   }
 
-  const fieldsById = new Map(options.fields.map((field) => [field.id, field]));
-  const fieldChoices = options.fields.filter((field) => chartFieldEligible(field));
+  const fieldsById = new Map(activeFields.map((field) => [field.id, field]));
+  const fieldChoices = activeFields.filter((field) => chartFieldEligible(field));
   const selectedFieldOptions = selectedFields.map((fieldId) => fieldsById.get(fieldId)).filter(Boolean) as FieldOption[];
   const chartRows = data?.rows || [];
+  const analysisTable = buildAnalysisTableRows(chartRows, queryFields, fieldsById, chartSource, selectedYears, activeCompanies);
+  const tableField = queryFields[0] ? fieldsById.get(queryFields[0]) : undefined;
   const trend = buildTrendChartRows(chartRows, selectedFields, fieldsById, selectedCompanies.length);
   const companyBars = buildCompanyChartRows(chartRows, selectedFields, fieldsById, selectedYears.length);
   const scatter = buildScatterRows(chartRows, scatterX, scatterY);
@@ -1732,10 +3908,19 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const hasSeriesOverflow = fullSeries.length > series.length;
   const selectedRightAxisFields = rightAxisFields.filter((fieldId) => selectedFields.includes(fieldId));
   const selectedSeries = series.find((item) => item.key === selectedSeriesKey) || series[0] || null;
-  const chartAspectRatio = chartAspectOptions.find((item) => item.id === chartAspect)?.ratio || 16 / 9;
   const selectedSeriesIndex = selectedSeries ? Math.max(0, series.findIndex((item) => item.key === selectedSeries.key)) : 0;
   const selectedSeriesStyle = selectedSeries ? seriesStyles[selectedSeries.key] || {} : {};
   const selectedSeriesRenderKind = getSeriesRenderKind(chartKind, selectedSeriesIndex, selectedSeriesStyle);
+  const previewRenderOptions: ChartRenderOptions = {
+    height: 420,
+    exportMode: false,
+    exportSettings,
+  };
+  const exportRenderOptions: ChartRenderOptions = {
+    height: Math.max(260, exportSettings.height - 34),
+    exportMode: true,
+    exportSettings,
+  };
 
   function updateSelectedSeriesStyle(patch: SeriesStyle) {
     if (!selectedSeries) return;
@@ -1757,19 +3942,174 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
     });
   }
 
+  function updateExportSettings(patch: Partial<ExportSettings>) {
+    setExportSettings((current) => ({ ...current, ...patch }));
+  }
+
+  function applyExportPreset(presetId: ExportPresetId) {
+    const preset = exportSizePresets.find((item) => item.id === presetId) || exportSizePresets[0];
+    setExportSettings((current) => ({
+      ...current,
+      presetId,
+      width: preset.width,
+      height: preset.height,
+    }));
+  }
+
+  function applyDesignPreset(designPreset: DesignPreset) {
+    setExportSettings((current) => ({
+      ...current,
+      designPreset,
+      legendPosition: designPreset === 'minimal' ? 'none' : 'bottom',
+      directLineLabels: designPreset === 'minimal' ? chartKind === 'line' || chartKind === 'combo' : current.directLineLabels,
+      marginPreset: designPreset === 'minimal' ? 'compact' : designPreset === 'report' ? 'wide' : 'standard',
+      fontScale: designPreset === 'report' ? 'large' : current.fontScale,
+    }));
+  }
+
+  function resetChartSelections(nextSource = chartSource) {
+    const sourceOptions = nextSource === 'stock' ? stockOptions : nextSource === 'factbook_orders' ? factbookOptions : options;
+    if (!sourceOptions) return;
+    setSelectedCompanies([]);
+    setSelectedYears([]);
+    setSelectedFields([]);
+    setRightAxisFields([]);
+    setScatterX('');
+    setScatterY('');
+    setSelectedSeriesKey('');
+    setData(null);
+  }
+
+  function renderActiveChart(options: ChartRenderOptions) {
+    if (!hasRequiredSelections) {
+      return <Empty message={chartSelectionMessage(chartSource, viewMode, chartKind)} />;
+    }
+    if (chartKind === 'scatter') {
+      return (
+        <ScatterChartBlock
+          rows={scatter}
+          xLabel={fieldsById.get(scatterX)?.name || scatterX}
+          yLabel={fieldsById.get(scatterY)?.name || scatterY}
+          showCorrelation={showCorrelation}
+          renderOptions={options}
+        />
+      );
+    }
+    const chartData = mode === 'company'
+      ? { rows: companyBars.rows, xKey: 'label' }
+      : { rows: trend.rows, xKey: 'fiscal_year' };
+    return (
+      <BarOrLineChartBlock
+        kind={chartKind}
+        rows={chartData.rows}
+        xKey={chartData.xKey}
+        series={series}
+        rightAxisFields={selectedRightAxisFields}
+        showValueLabels={showValueLabels}
+        seriesStyles={seriesStyles}
+        renderOptions={options}
+      />
+    );
+  }
+
+  async function copyTableCsv() {
+    if (!analysisTable.rows.length) return;
+    setExportMessage('');
+    setExportError('');
+    try {
+      await navigator.clipboard.writeText(toCsv(analysisTable.rows, analysisTable.columns, analysisTable.labels));
+      setExportMessage('表をCSVとしてコピーしました。');
+    } catch (err) {
+      setExportError(String(err));
+    }
+  }
+
+  function exportTableCsv() {
+    if (!analysisTable.rows.length) return;
+    setExportMessage('');
+    setExportError('');
+    downloadText(toCsv(analysisTable.rows, analysisTable.columns, analysisTable.labels), chartExportFileName('csv'));
+    setExportMessage('表CSVを書き出しました。');
+  }
+
+  async function exportPng(copyToClipboard = false) {
+    if (!exportRef.current) return;
+    setExportMessage('');
+    setExportError('');
+    try {
+      const backgroundColor = exportSettings.background === 'white' ? '#ffffff' : undefined;
+      const dataUrl = await toPng(exportRef.current, {
+        pixelRatio: exportSettings.pixelRatio,
+        backgroundColor,
+        cacheBust: true,
+      });
+      if (copyToClipboard) {
+        if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+          throw new Error('このブラウザでは画像のクリップボードコピーに対応していません。PNG保存を使ってください。');
+        }
+        const blob = await fetch(dataUrl).then((response) => response.blob());
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        setExportMessage('PNGをクリップボードにコピーしました。');
+      } else {
+        downloadDataUrl(dataUrl, chartExportFileName('png'));
+        setExportMessage('PNGを書き出しました。');
+      }
+    } catch (err) {
+      setExportError(String(err));
+    }
+  }
+
+  async function exportSvg() {
+    if (!exportRef.current) return;
+    setExportMessage('');
+    setExportError('');
+    try {
+      const backgroundColor = exportSettings.background === 'white' ? '#ffffff' : undefined;
+      const dataUrl = await toSvg(exportRef.current, {
+        backgroundColor,
+        cacheBust: true,
+      });
+      downloadDataUrl(dataUrl, chartExportFileName('svg'));
+      setExportMessage('SVGを書き出しました。');
+    } catch (err) {
+      setExportError(String(err));
+    }
+  }
+
   return (
     <section className="stack">
       <div className="filter-bar chart-filter-bar">
         <label className="filter-field small">
-          <span>種類</span>
-          <select value={chartKind} onChange={(e) => setChartKind(e.target.value as ChartKind)}>
-            <option value="line">折れ線</option>
-            <option value="bar">棒</option>
-            <option value="combo">複合</option>
-            <option value="scatter">散布図</option>
+          <span>データ</span>
+          <select value={chartSource} onChange={(e) => {
+            const nextSource = e.target.value as ChartSource;
+            setChartSource(nextSource);
+            resetChartSelections(nextSource);
+          }}>
+            <option value="financial">有報データ</option>
+            <option value="stock">株価月次</option>
+            <option value="factbook_orders">ファクトブック受注</option>
           </select>
         </label>
-        {chartKind !== 'scatter' && (
+        <label className="filter-field small">
+          <span>出力</span>
+          <select value={viewMode} onChange={(e) => setViewMode(e.target.value as ChartViewMode)}>
+            <option value="chart">グラフ</option>
+            <option value="table">表</option>
+          </select>
+        </label>
+        {viewMode === 'chart' && (
+          <label className="filter-field small">
+            <span>種類</span>
+            <select value={chartKind} onChange={(e) => setChartKind(e.target.value as ChartKind)}>
+              <option value="line">折れ線</option>
+              <option value="bar">棒</option>
+              <option value="combo">複合</option>
+              <option value="scatter">散布図</option>
+            </select>
+          </label>
+        )}
+        {viewMode === 'chart' && chartKind !== 'scatter' && (
           <label className="filter-field">
             <span>比較軸</span>
             <select value={mode} onChange={(e) => setMode(e.target.value as ChartMode)}>
@@ -1779,166 +4119,297 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
           </label>
         )}
         <button className="ghost" onClick={() => {
-          setSelectedCompanies(options.companies.slice(0, 5).map((item) => item.id));
-          setSelectedYears(options.years.slice(-6));
-          setSelectedFields(['roe'].filter((field) => fieldsById.has(field)));
-          setRightAxisFields([]);
+          resetChartSelections();
         }}>
           初期化
         </button>
       </div>
       {optionsError && <InlineError message={optionsError} />}
+      {stockOptionsError && <InlineError message={stockOptionsError} />}
+      {factbookOptionsError && <InlineError message={factbookOptionsError} />}
       {error && <InlineError message={error} />}
       <div className="chart-workbench">
         <div className="panel chart-controls">
           <ChoiceGroup
-            title="会社"
-            items={options.companies}
+            title="会社名"
+            items={activeCompanies}
             selected={selectedCompanies}
             onToggle={(id) => setSelectedCompanies(toggleValue(selectedCompanies, id))}
-            onAll={() => setSelectedCompanies(options.companies.map((item) => item.id))}
+            onAll={() => setSelectedCompanies(activeCompanies.map((item) => item.id))}
             onClear={() => setSelectedCompanies([])}
+            allLabel="会社すべて"
+            clearLabel="会社解除"
           />
           <ChoiceGroup
-            title="年度"
-            items={options.years.map((year) => ({ id: year, label: year, name: year }))}
+            title={chartSource === 'stock' ? '月' : '年度'}
+            items={activePeriods.map((period) => ({ id: period, label: period, name: period }))}
             selected={selectedYears}
             onToggle={(id) => setSelectedYears(toggleValue(selectedYears, id))}
-            onAll={() => setSelectedYears(options.years)}
+            onAll={() => setSelectedYears(activePeriods)}
             onClear={() => setSelectedYears([])}
+            allLabel={chartSource === 'stock' ? '月すべて' : '年度すべて'}
+            clearLabel={chartSource === 'stock' ? '月解除' : '年度解除'}
             compact
           />
-          <div className="chart-style-section">
+          {viewMode === 'chart' && (
+            <div className="chart-style-section">
+              <div className="choice-head">
+                <h3>表示設定</h3>
+              </div>
+              {chartKind !== 'scatter' ? (
+                <>
+                  <label className="check-field chart-label-toggle">
+                    <input
+                      type="checkbox"
+                      checked={showValueLabels}
+                      onChange={(event) => setShowValueLabels(event.target.checked)}
+                    />
+                    <span>値ラベルを表示</span>
+                  </label>
+                  <label className="check-field chart-label-toggle">
+                    <input
+                      type="checkbox"
+                      checked={editMode}
+                      onChange={(event) => setEditMode(event.target.checked)}
+                    />
+                    <span>編集モード</span>
+                  </label>
+                </>
+              ) : (
+                <label className="check-field chart-label-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showCorrelation}
+                    onChange={(event) => setShowCorrelation(event.target.checked)}
+                  />
+                  <span>相関係数を表示</span>
+                </label>
+              )}
+              {chartKind !== 'scatter' && editMode && selectedSeries && (
+                <div className="series-editor">
+                  <label className="filter-field">
+                    <span>系列</span>
+                    <select value={selectedSeries.key} onChange={(event) => setSelectedSeriesKey(event.target.value)}>
+                      {series.map((item) => (
+                        <option key={item.key} value={item.key}>{item.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="filter-field color-field">
+                    <span>色</span>
+                    <input
+                      type="color"
+                      value={selectedSeriesStyle.color || chartColors[selectedSeriesIndex % chartColors.length]}
+                      onChange={(event) => updateSelectedSeriesStyle({ color: event.target.value })}
+                    />
+                  </label>
+                  {chartKind === 'combo' && (
+                    <label className="filter-field">
+                      <span>表示形式</span>
+                      <select
+                        value={selectedSeriesRenderKind}
+                        onChange={(event) => updateSelectedSeriesStyle({ renderAs: event.target.value as SeriesRenderKind })}
+                      >
+                        <option value="bar">棒</option>
+                        <option value="line">線</option>
+                      </select>
+                    </label>
+                  )}
+                  {selectedSeriesRenderKind === 'line' && (
+                    <>
+                      <label className="filter-field">
+                        <span>太さ {selectedSeriesStyle.strokeWidth || 2.2}</span>
+                        <input
+                          type="range"
+                          min="1"
+                          max="6"
+                          step="0.2"
+                          value={selectedSeriesStyle.strokeWidth || 2.2}
+                          onChange={(event) => updateSelectedSeriesStyle({ strokeWidth: Number(event.target.value) })}
+                        />
+                      </label>
+                      <label className="filter-field">
+                        <span>線種</span>
+                        <select
+                          value={linePatternOptions.find((item) => item.dasharray === (selectedSeriesStyle.strokeDasharray || ''))?.id || 'solid'}
+                          onChange={(event) => {
+                            const selected = linePatternOptions.find((item) => item.id === event.target.value) || linePatternOptions[0];
+                            updateSelectedSeriesStyle({ strokeDasharray: selected.dasharray });
+                          }}
+                        >
+                          {linePatternOptions.map((item) => (
+                            <option key={item.id} value={item.id}>{item.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
+                  )}
+                  <button type="button" className="ghost" onClick={resetSelectedSeriesStyle}>選択系列を初期化</button>
+                </div>
+              )}
+            </div>
+          )}
+          {viewMode === 'chart' && (
+            <div className="chart-style-section export-settings-panel">
             <div className="choice-head">
-              <h3>表示設定</h3>
+              <h3>PPT書き出し</h3>
             </div>
             <label className="filter-field">
-              <span>縦横比</span>
-              <select value={chartAspect} onChange={(event) => setChartAspect(event.target.value as (typeof chartAspectOptions)[number]['id'])}>
-                {chartAspectOptions.map((item) => (
+              <span>サイズ</span>
+              <select value={exportSettings.presetId} onChange={(event) => applyExportPreset(event.target.value as ExportPresetId)}>
+                {exportSizePresets.map((item) => (
                   <option key={item.id} value={item.id}>{item.label}</option>
                 ))}
               </select>
             </label>
-            {chartKind !== 'scatter' ? (
-              <>
-                <label className="check-field chart-label-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showValueLabels}
-                    onChange={(event) => setShowValueLabels(event.target.checked)}
-                  />
-                  <span>値ラベルを表示</span>
-                </label>
-                <label className="check-field chart-label-toggle">
-                  <input
-                    type="checkbox"
-                    checked={editMode}
-                    onChange={(event) => setEditMode(event.target.checked)}
-                  />
-                  <span>編集モード</span>
-                </label>
-              </>
-            ) : (
+            <div className="export-size-grid">
+              <label className="filter-field">
+                <span>幅px</span>
+                <input
+                  type="number"
+                  min="480"
+                  max="2400"
+                  step="10"
+                  value={exportSettings.width}
+                  onChange={(event) => updateExportSettings({ width: clampNumber(event.target.value, 480, 2400, exportSettings.width) })}
+                />
+              </label>
+              <label className="filter-field">
+                <span>高さpx</span>
+                <input
+                  type="number"
+                  min="300"
+                  max="1600"
+                  step="10"
+                  value={exportSettings.height}
+                  onChange={(event) => updateExportSettings({ height: clampNumber(event.target.value, 300, 1600, exportSettings.height) })}
+                />
+              </label>
+            </div>
+            <div className="export-size-grid">
+              <label className="filter-field">
+                <span>解像度</span>
+                <select value={exportSettings.pixelRatio} onChange={(event) => updateExportSettings({ pixelRatio: Number(event.target.value) as 1 | 2 | 3 })}>
+                  <option value={1}>1x</option>
+                  <option value={2}>2x</option>
+                  <option value={3}>3x</option>
+                </select>
+              </label>
+              <label className="filter-field">
+                <span>背景</span>
+                <select value={exportSettings.background} onChange={(event) => updateExportSettings({ background: event.target.value as ExportBackground })}>
+                  <option value="white">白</option>
+                  <option value="transparent">透明</option>
+                </select>
+              </label>
+            </div>
+            <label className="filter-field">
+              <span>デザイン</span>
+              <select value={exportSettings.designPreset} onChange={(event) => applyDesignPreset(event.target.value as DesignPreset)}>
+                {Object.entries(designPresets).map(([id, preset]) => (
+                  <option key={id} value={id}>{preset.label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="export-size-grid">
+              <label className="filter-field">
+                <span>余白</span>
+                <select value={exportSettings.marginPreset} onChange={(event) => updateExportSettings({ marginPreset: event.target.value as ExportMarginPreset })}>
+                  <option value="compact">小</option>
+                  <option value="standard">標準</option>
+                  <option value="wide">広め</option>
+                </select>
+              </label>
+              <label className="filter-field">
+                <span>文字</span>
+                <select value={exportSettings.fontScale} onChange={(event) => updateExportSettings({ fontScale: event.target.value as ExportFontScale })}>
+                  <option value="small">小</option>
+                  <option value="standard">標準</option>
+                  <option value="large">大</option>
+                </select>
+              </label>
+            </div>
+            <label className="filter-field">
+              <span>凡例</span>
+              <select value={exportSettings.legendPosition} onChange={(event) => updateExportSettings({ legendPosition: event.target.value as LegendPosition })}>
+                <option value="bottom">下</option>
+                <option value="top">上</option>
+                <option value="right">右</option>
+                <option value="none">非表示</option>
+              </select>
+            </label>
+            {(chartKind === 'line' || chartKind === 'combo') && (
               <label className="check-field chart-label-toggle">
                 <input
                   type="checkbox"
-                  checked={showCorrelation}
-                  onChange={(event) => setShowCorrelation(event.target.checked)}
+                  checked={exportSettings.directLineLabels}
+                  onChange={(event) => updateExportSettings({ directLineLabels: event.target.checked })}
                 />
-                <span>相関係数を表示</span>
+                <span>線の右端に系列名</span>
               </label>
             )}
-            {chartKind !== 'scatter' && editMode && selectedSeries && (
-              <div className="series-editor">
-                <label className="filter-field">
-                  <span>系列</span>
-                  <select value={selectedSeries.key} onChange={(event) => setSelectedSeriesKey(event.target.value)}>
-                    {series.map((item) => (
-                      <option key={item.key} value={item.key}>{item.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="filter-field color-field">
-                  <span>色</span>
-                  <input
-                    type="color"
-                    value={selectedSeriesStyle.color || chartColors[selectedSeriesIndex % chartColors.length]}
-                    onChange={(event) => updateSelectedSeriesStyle({ color: event.target.value })}
-                  />
-                </label>
-                {chartKind === 'combo' && (
-                  <label className="filter-field">
-                    <span>表示形式</span>
-                    <select
-                      value={selectedSeriesRenderKind}
-                      onChange={(event) => updateSelectedSeriesStyle({ renderAs: event.target.value as SeriesRenderKind })}
-                    >
-                      <option value="bar">棒</option>
-                      <option value="line">線</option>
-                    </select>
-                  </label>
-                )}
-                {selectedSeriesRenderKind === 'line' && (
-                  <>
-                    <label className="filter-field">
-                      <span>太さ {selectedSeriesStyle.strokeWidth || 2.2}</span>
-                      <input
-                        type="range"
-                        min="1"
-                        max="6"
-                        step="0.2"
-                        value={selectedSeriesStyle.strokeWidth || 2.2}
-                        onChange={(event) => updateSelectedSeriesStyle({ strokeWidth: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label className="filter-field">
-                      <span>線種</span>
-                      <select
-                        value={linePatternOptions.find((item) => item.dasharray === (selectedSeriesStyle.strokeDasharray || ''))?.id || 'solid'}
-                        onChange={(event) => {
-                          const selected = linePatternOptions.find((item) => item.id === event.target.value) || linePatternOptions[0];
-                          updateSelectedSeriesStyle({ strokeDasharray: selected.dasharray });
-                        }}
-                      >
-                        {linePatternOptions.map((item) => (
-                          <option key={item.id} value={item.id}>{item.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </>
-                )}
-                <button type="button" className="ghost" onClick={resetSelectedSeriesStyle}>選択系列を初期化</button>
-              </div>
-            )}
+            <div className="export-actions">
+              <button type="button" onClick={() => exportPng(false)} disabled={!hasRequiredSelections || !chartRows.length}>PNG保存</button>
+              <button type="button" className="secondary" onClick={() => exportPng(true)} disabled={!hasRequiredSelections || !chartRows.length}>PNGコピー</button>
+              <button type="button" className="ghost" onClick={exportSvg} disabled={!hasRequiredSelections || !chartRows.length}>SVG保存</button>
+            </div>
+            {exportMessage && <p className="success-text">{exportMessage}</p>}
+            {exportError && <InlineError message={exportError} />}
           </div>
-          {chartKind === 'scatter' ? (
+          )}
+          {viewMode === 'table' && (
+            <div className="chart-style-section export-settings-panel">
+              <div className="choice-head">
+                <h3>表書き出し</h3>
+              </div>
+              <div className="export-actions table-export-actions">
+                <button type="button" onClick={exportTableCsv} disabled={!analysisTable.rows.length}>CSV保存</button>
+                <button type="button" className="secondary" onClick={copyTableCsv} disabled={!analysisTable.rows.length}>CSVコピー</button>
+              </div>
+              {exportMessage && <p className="success-text">{exportMessage}</p>}
+              {exportError && <InlineError message={exportError} />}
+            </div>
+          )}
+          {viewMode === 'chart' && chartKind === 'scatter' ? (
             <div className="choice-section">
               <h3>散布図の軸</h3>
               <label className="filter-field">
                 <span>X軸</span>
                 <select value={scatterX} onChange={(e) => setScatterX(e.target.value)}>
-                  {fieldChoices.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+                  <option value="">未選択</option>
+                  {fieldOptionGroups(fieldChoices).map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.items.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </label>
               <label className="filter-field">
                 <span>Y軸</span>
                 <select value={scatterY} onChange={(e) => setScatterY(e.target.value)}>
-                  {fieldChoices.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+                  <option value="">未選択</option>
+                  {fieldOptionGroups(fieldChoices).map((group) => (
+                    <optgroup key={group.key} label={group.label}>
+                      {group.items.map((field) => <option key={field.id} value={field.id}>{field.label}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </label>
             </div>
           ) : (
             <ChoiceGroup
               title="項目"
-              items={fieldChoices.map((field) => ({ id: field.id, label: field.label, name: field.name }))}
-              selected={selectedFields}
-              onToggle={(id) => setSelectedFields(toggleValue(selectedFields, id))}
-              onAll={() => setSelectedFields(fieldChoices.slice(0, 8).map((item) => item.id))}
+              items={fieldChoices.map((field) => ({ id: field.id, label: field.label, name: field.name, category: field.category }))}
+              selected={viewMode === 'table' ? selectedFields.slice(0, 1) : selectedFields}
+              onToggle={(id) => setSelectedFields(viewMode === 'table' ? toggleSingleValue(selectedFields, id) : toggleValue(selectedFields, id))}
+              onAll={() => setSelectedFields(viewMode === 'table' ? (fieldChoices[0] ? [fieldChoices[0].id] : []) : fieldChoices.slice(0, 8).map((item) => item.id))}
               onClear={() => setSelectedFields([])}
+              allLabel={viewMode === 'table' ? '先頭項目' : '項目候補'}
+              clearLabel="項目解除"
+              groupByCategory
             />
           )}
-          {chartKind !== 'scatter' && selectedFieldOptions.length > 1 && (
+          {viewMode === 'chart' && chartKind !== 'scatter' && selectedFieldOptions.length > 1 && (
             <ChoiceGroup
               title="右軸"
               items={selectedFieldOptions.map((field) => ({ id: field.id, label: field.label, name: field.name }))}
@@ -1946,6 +4417,8 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
               onToggle={(id) => setRightAxisFields(toggleValue(selectedRightAxisFields, id))}
               onAll={() => setRightAxisFields(selectedFields)}
               onClear={() => setRightAxisFields([])}
+              allLabel="右軸すべて"
+              clearLabel="右軸解除"
               compact
             />
           )}
@@ -1953,57 +4426,125 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
         <div className="panel chart-main-panel">
           <div className="panel-head">
             <div>
-              <h2>{chartTitle(chartKind, mode)}</h2>
+              <h2>{viewMode === 'table' ? `分析表${tableField ? `: ${tableField.name}` : ''}` : chartTitle(chartKind, mode, chartSource)}</h2>
               <p className="muted">
-                {data ? `${data.total}行を読み込み / ${queryFields.length}項目` : 'データを読み込み中です。'}
+                {hasRequiredSelections ? (data ? `${data.total}行を読み込み / ${queryFields.length}項目` : 'データを読み込み中です。') : chartSelectionMessage(chartSource, viewMode, chartKind)}
                 {data?.omitted_rows ? ` / ${data.omitted_rows}行は上限超過で省略` : ''}
+                {chartSourceLabel(chartSource)}
               </p>
             </div>
-            {hasSeriesOverflow && <span className="badge running">系列を18件に制限</span>}
+            {viewMode === 'chart' && hasSeriesOverflow && <span className="badge running">系列を18件に制限</span>}
           </div>
-          {chartKind === 'scatter' ? (
-            <ScatterChartBlock
-              rows={scatter}
-              xLabel={fieldsById.get(scatterX)?.name || scatterX}
-              yLabel={fieldsById.get(scatterY)?.name || scatterY}
-              aspectRatio={chartAspectRatio}
-              showCorrelation={showCorrelation}
-            />
-          ) : mode === 'company' ? (
-            <BarOrLineChartBlock
-              kind={chartKind}
-              rows={companyBars.rows}
-              xKey="label"
-              series={series}
-              rightAxisFields={selectedRightAxisFields}
-              showValueLabels={showValueLabels}
-              seriesStyles={seriesStyles}
-              aspectRatio={chartAspectRatio}
-            />
+          {viewMode === 'table' ? (
+            <AnalysisTableBlock table={analysisTable} emptyMessage={chartSelectionMessage(chartSource, viewMode, chartKind)} />
           ) : (
-            <BarOrLineChartBlock
-              kind={chartKind}
-              rows={trend.rows}
-              xKey="fiscal_year"
-              series={series}
-              rightAxisFields={selectedRightAxisFields}
-              showValueLabels={showValueLabels}
-              seriesStyles={seriesStyles}
-              aspectRatio={chartAspectRatio}
-            />
+            renderActiveChart(previewRenderOptions)
           )}
           <div className="chart-meta">
-            <span>会社 {selectedCompanies.length || '全社'}</span>
-            <span>年度 {selectedYears.length || '全年度'}</span>
-            <span>項目 {chartKind === 'scatter' ? '2' : selectedFields.length}</span>
-            {chartKind !== 'scatter' && <span>右軸 {selectedRightAxisFields.length || 'なし'}</span>}
+            <span>会社 {selectedCompanies.length || '未選択'}</span>
+            <span>{chartSource === 'stock' ? '月' : '年度'} {selectedYears.length || '未選択'}</span>
+            <span>項目 {viewMode === 'chart' && chartKind === 'scatter' ? queryFields.length || '未選択' : queryFields.length || '未選択'}</span>
+            {viewMode === 'chart' && chartKind !== 'scatter' && <span>右軸 {selectedRightAxisFields.length || 'なし'}</span>}
           </div>
-          {selectedFields.length > 1 && chartKind !== 'scatter' && (
+          {selectedFields.length > 1 && viewMode === 'chart' && chartKind !== 'scatter' && (
             <p className="hint">単位が違う項目を同じ軸に載せると見え方が歪みます。比較しにくい場合は項目を絞ってください。</p>
           )}
+          <SourceSummaryPanel sources={data?.sources || []} />
         </div>
       </div>
+      {viewMode === 'chart' && (
+        <ChartExportFrame exportRef={exportRef} settings={exportSettings}>
+          {renderActiveChart(exportRenderOptions)}
+        </ChartExportFrame>
+      )}
     </section>
+  );
+}
+
+function ChartExportFrame({
+  exportRef,
+  settings,
+  children,
+}: {
+  exportRef: React.RefObject<HTMLDivElement | null>;
+  settings: ExportSettings;
+  children: React.ReactNode;
+}) {
+  const background = settings.background === 'white' ? '#ffffff' : 'transparent';
+  return (
+    <div className="chart-export-stage" aria-hidden="true">
+      <div
+        ref={exportRef}
+        className={`chart-export-frame chart-export-${settings.designPreset}`}
+        style={{
+          width: settings.width,
+          height: settings.height,
+          background,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function AnalysisTableBlock({ table, emptyMessage }: { table: AnalysisTableData; emptyMessage: string }) {
+  if (!table.columns.length) {
+    return <Empty message={emptyMessage} />;
+  }
+  if (!table.rows.length) {
+    return <Empty message="表にできる数値データがありません。" />;
+  }
+  return (
+    <div className="analysis-table">
+      <div className="analysis-table-legend">
+        <span>単位</span>
+        <strong>{table.unit || '-'}</strong>
+      </div>
+      <DataTable
+        data={table.rows}
+        columns={table.columns}
+        columnLabels={table.labels}
+        compact
+        markEmptyCells
+      />
+    </div>
+  );
+}
+
+function SourceSummaryPanel({ sources }: { sources: SourceSummary[] }) {
+  const rows: Row[] = sources.slice(0, 40).map((source) => ({ ...source }));
+  const columns = [
+    'company_name',
+    'period',
+    'field_name',
+    'value',
+    'unit',
+    'data_scope',
+    'source_file',
+    'source_heading',
+    'source_quote',
+    'extraction_method',
+    'confidence'
+  ].filter((column) => rows.some((row) => String(row[column] ?? '').trim()));
+  return (
+    <div className="source-summary">
+      <div className="source-summary-head">
+        <h3>出典</h3>
+        <span>{sources.length ? `${sources.length}件` : '未表示'}</span>
+      </div>
+      {rows.length && columns.length ? (
+        <DataTable
+          data={rows}
+          columns={columns}
+          columnLabels={sourceSummaryColumnLabels}
+          compact
+          clampAllCells
+        />
+      ) : (
+        <p className="muted">出典行はありません。</p>
+      )}
+    </div>
   );
 }
 
@@ -2014,46 +4555,63 @@ function ChoiceGroup({
   onToggle,
   onAll,
   onClear,
-  compact = false
+  compact = false,
+  groupByCategory = false,
+  allLabel = '選択',
+  clearLabel = '解除'
 }: {
   title: string;
-  items: Array<{ id: string; label: string; name?: string }>;
+  items: Array<{ id: string; label: string; name?: string; category?: string }>;
   selected: string[];
   onToggle: (id: string) => void;
   onAll: () => void;
   onClear: () => void;
   compact?: boolean;
+  groupByCategory?: boolean;
+  allLabel?: string;
+  clearLabel?: string;
 }) {
+  const groups = groupByCategory ? choiceItemGroups(items) : [{ key: 'all', label: '', items }];
   return (
     <div className="choice-section">
       <div className="choice-head">
         <h3>{title}</h3>
         <div>
-          <button className="ghost" type="button" onClick={onAll}>選択</button>
-          <button className="ghost" type="button" onClick={onClear}>解除</button>
+          <button className="ghost" type="button" onClick={onAll}>{allLabel}</button>
+          <button className="ghost" type="button" onClick={onClear}>{clearLabel}</button>
         </div>
       </div>
-      <div className={`choice-grid ${compact ? 'compact-choice' : ''}`}>
-        {items.map((item) => {
-          const active = selected.includes(item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={`choice-chip ${active ? 'active' : ''}`}
-              onClick={() => onToggle(item.id)}
-              title={item.label}
-            >
-              <span>{item.name || item.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {groups.map((group) => (
+        <div className={groupByCategory ? 'choice-category' : ''} key={group.key}>
+          {groupByCategory && (
+            <div className="choice-category-head">
+              <span>{group.label}</span>
+              <small>{group.items.length}</small>
+            </div>
+          )}
+          <div className={`choice-grid ${compact ? 'compact-choice' : ''}`}>
+            {group.items.map((item) => {
+              const active = selected.includes(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`choice-chip ${active ? 'active' : ''}`}
+                  onClick={() => onToggle(item.id)}
+                  title={item.label}
+                >
+                  <span>{item.name || item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
-function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showValueLabels, seriesStyles, aspectRatio }: {
+function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showValueLabels, seriesStyles, renderOptions }: {
   kind: Exclude<ChartKind, 'scatter'>;
   rows: Row[];
   xKey: string;
@@ -2061,7 +4619,7 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
   rightAxisFields: string[];
   showValueLabels: boolean;
   seriesStyles: Record<string, SeriesStyle>;
-  aspectRatio: number;
+  renderOptions: ChartRenderOptions;
 }) {
   if (!rows.length || !series.length) {
     return <Empty message="グラフ化できる数値データがありません。" />;
@@ -2070,49 +4628,57 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
   const rightAxisSet = new Set(rightAxisFields);
   const hasRightAxis = series.some((item) => rightAxisSet.has(item.fieldId));
   const seriesByKey = new Map(series.map((item) => [item.key, item]));
+  const font = exportFontScales[renderOptions.exportSettings.fontScale];
+  const design = designPresets[renderOptions.exportSettings.designPreset];
+  const margin = chartMargin(renderOptions.exportSettings, hasRightAxis);
+  const legendProps = chartLegendProps(renderOptions.exportSettings, font.legend);
+  const lastIndexes = lastValueIndexes(rows, series);
   return (
-    <div className="chart-canvas">
-      <ResponsiveContainer width="100%" aspect={aspectRatio}>
-        <ChartComponent data={rows} margin={{ top: 18, right: hasRightAxis ? 38 : 18, bottom: 4, left: 6 }}>
-          <CartesianGrid stroke="#edf2f7" vertical={false} />
+    <div className={`chart-canvas ${renderOptions.exportMode ? 'chart-canvas-export' : ''} chart-design-${renderOptions.exportSettings.designPreset}`}>
+      <ResponsiveContainer width="100%" height={renderOptions.height}>
+        <ChartComponent data={rows} margin={margin}>
+          <CartesianGrid stroke={design.grid} vertical={false} />
           <XAxis
             dataKey={xKey}
-            axisLine={{ stroke: '#cbd5df' }}
-            tick={{ fill: '#5f6f7b', fontSize: 12 }}
+            axisLine={{ stroke: design.axis }}
+            tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickLine={false}
             tickMargin={10}
           />
           <YAxis
             yAxisId="left"
             axisLine={false}
-            tick={{ fill: '#5f6f7b', fontSize: 12 }}
+            tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
             tickLine={false}
-            width={58}
+            width={font.tick >= 16 ? 70 : 58}
           />
           {hasRightAxis && (
             <YAxis
               yAxisId="right"
               orientation="right"
               axisLine={false}
-              tick={{ fill: '#5f6f7b', fontSize: 12 }}
+              tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
               tickFormatter={formatAxisTick}
               tickLine={false}
-              width={58}
+              width={font.tick >= 16 ? 70 : 58}
             />
           )}
           <Tooltip content={<ChartTooltip seriesByKey={seriesByKey} />} />
-          <Legend
-            iconSize={9}
-            wrapperStyle={{ color: '#4c5f6b', fontSize: 12, paddingTop: 12 }}
-            formatter={(value) => seriesByKey.get(String(value))?.label || String(value)}
-          />
+          {legendProps && (
+            <Legend
+              iconSize={10}
+              {...legendProps}
+              formatter={(value) => seriesByKey.get(String(value))?.label || String(value)}
+            />
+          )}
           {series.map((item, index) => {
             const style = seriesStyles[item.key] || {};
             const color = style.color || chartColors[index % chartColors.length];
             const renderKind = getSeriesRenderKind(kind, index, style);
             const strokeWidth = style.strokeWidth || 2.2;
             const strokeDasharray = style.strokeDasharray || undefined;
+            const showDirectLabel = renderKind === 'line' && renderOptions.exportSettings.directLineLabels;
             return renderKind === 'bar' ? (
               <Bar
                 key={item.key}
@@ -2122,6 +4688,7 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
                 fill={color}
                 radius={[3, 3, 0, 0]}
                 maxBarSize={28}
+                isAnimationActive={false}
               >
                 {showValueLabels && (
                   <LabelList
@@ -2145,7 +4712,15 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
                 dot={showValueLabels ? renderLinePointWithLabel : { r: 3.2, fill: '#ffffff', strokeWidth: 1.8 }}
                 activeDot={{ r: 5.2, strokeWidth: 2 }}
                 connectNulls={false}
-              />
+                isAnimationActive={false}
+              >
+                {showDirectLabel && (
+                  <LabelList
+                    dataKey={item.key}
+                    content={(props) => renderLineEndLabel(props, item, lastIndexes[item.key], color, font.label)}
+                  />
+                )}
+              </Line>
             );
           })}
         </ChartComponent>
@@ -2176,34 +4751,63 @@ function renderLinePointWithLabel(props: {
   );
 }
 
-function ScatterChartBlock({ rows, xLabel, yLabel, aspectRatio, showCorrelation }: {
+function renderLineEndLabel(
+  props: { x?: string | number; y?: string | number; index?: number },
+  series: ChartSeries,
+  lastIndex: number | undefined,
+  color: string,
+  fontSize: number,
+) {
+  if (lastIndex == null || props.index !== lastIndex) return null;
+  const x = Number(props.x);
+  const y = Number(props.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return (
+    <text
+      className="chart-line-end-label"
+      x={x + 8}
+      y={y + 4}
+      fill={color}
+      fontSize={fontSize}
+      textAnchor="start"
+    >
+      {series.companyName || series.label}
+    </text>
+  );
+}
+
+function ScatterChartBlock({ rows, xLabel, yLabel, showCorrelation, renderOptions }: {
   rows: Row[];
   xLabel: string;
   yLabel: string;
-  aspectRatio: number;
   showCorrelation: boolean;
+  renderOptions: ChartRenderOptions;
 }) {
   if (!rows.length) {
     return <Empty message="散布図にできる数値ペアがありません。" />;
   }
   const correlation = pearsonCorrelation(rows);
+  const font = exportFontScales[renderOptions.exportSettings.fontScale];
+  const design = designPresets[renderOptions.exportSettings.designPreset];
+  const margin = chartMargin(renderOptions.exportSettings, false);
+  const legendProps = chartLegendProps(renderOptions.exportSettings, font.legend);
   return (
-    <div className="chart-canvas">
+    <div className={`chart-canvas ${renderOptions.exportMode ? 'chart-canvas-export' : ''} chart-design-${renderOptions.exportSettings.designPreset}`}>
       {showCorrelation && correlation != null && (
         <div className="chart-stat">
           <span>相関係数</span>
-          <strong>{correlation.toFixed(3)}</strong>
+          <strong style={{ fontSize: font.stat }}>{correlation.toFixed(3)}</strong>
         </div>
       )}
-      <ResponsiveContainer width="100%" aspect={aspectRatio}>
-        <ScatterChart margin={{ top: 18, right: 18, bottom: 4, left: 6 }}>
-          <CartesianGrid stroke="#edf2f7" vertical={false} />
+      <ResponsiveContainer width="100%" height={renderOptions.height}>
+        <ScatterChart margin={margin}>
+          <CartesianGrid stroke={design.grid} vertical={false} />
           <XAxis
             type="number"
             dataKey="x"
             name={xLabel}
-            axisLine={{ stroke: '#cbd5df' }}
-            tick={{ fill: '#5f6f7b', fontSize: 12 }}
+            axisLine={{ stroke: design.axis }}
+            tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
             tickLine={false}
             tickMargin={10}
@@ -2213,14 +4817,14 @@ function ScatterChartBlock({ rows, xLabel, yLabel, aspectRatio, showCorrelation 
             dataKey="y"
             name={yLabel}
             axisLine={false}
-            tick={{ fill: '#5f6f7b', fontSize: 12 }}
+            tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
             tickLine={false}
-            width={58}
+            width={font.tick >= 16 ? 70 : 58}
           />
           <Tooltip cursor={{ stroke: '#9aa8b5', strokeDasharray: '3 3' }} content={<ScatterTooltip xLabel={xLabel} yLabel={yLabel} />} />
-          <Legend wrapperStyle={{ color: '#4c5f6b', fontSize: 12, paddingTop: 12 }} />
-          <Scatter name={`${xLabel} x ${yLabel}`} data={rows} fill="#111827" />
+          {legendProps && <Legend {...legendProps} />}
+          <Scatter name={`${xLabel} x ${yLabel}`} data={rows} fill="#111827" isAnimationActive={false} />
         </ScatterChart>
       </ResponsiveContainer>
     </div>
@@ -2290,10 +4894,17 @@ function ScatterTooltip({
   );
 }
 
-function ReportPanel({ status, refreshToken }: { status: Status | null; refreshToken: number }) {
+function ReportPanel({ status, refreshToken, job, onJob, onError }: {
+  status: Status | null;
+  refreshToken: number;
+  job: Job | null;
+  onJob: (job: Job) => void;
+  onError: (message: string) => void;
+}) {
   const [report, setReport] = React.useState('');
   const [coverage, setCoverage] = React.useState('');
   const [learningImpact, setLearningImpact] = React.useState('');
+  const jobRunning = job?.status === 'running';
 
   React.useEffect(() => {
     api<{ content: string }>('/api/markdown/run_report').then((data) => setReport(data.content));
@@ -2323,6 +4934,7 @@ function ReportPanel({ status, refreshToken }: { status: Status | null; refreshT
           <Empty message="サマリー数値がありません。" />
         )}
       </div>
+      <CorroborationSummaryPanel job={job} onJob={onJob} onError={onError} jobRunning={jobRunning} refreshToken={refreshToken} />
       <MarkdownBlock title="Run Report" content={report} />
       <MarkdownBlock title="Review Learning Impact" content={learningImpact || 'まだレビュー学習後の再取得が実行されていません。'} />
       <MarkdownBlock title="Field Coverage" content={coverage} />
@@ -2330,8 +4942,476 @@ function ReportPanel({ status, refreshToken }: { status: Status | null; refreshT
   );
 }
 
+function corroborationPercent(part: number | undefined, total: number | undefined): string {
+  if (!total || part == null) return '-';
+  return `${((part / total) * 100).toFixed(1)}%`;
+}
+
+const MAPPING_ACTION_LABELS: Record<string, string> = {
+  map: 'map（既存概念へ対応）',
+  different_scope: 'different_scope（範囲不一致）',
+  ignore: 'ignore（対応不要）',
+  new_concept: 'new_concept（新規概念）'
+};
+
+function MappingReviewPanel({ onError, refreshToken }: { onError: (message: string) => void; refreshToken: number }) {
+  const [actionFilter, setActionFilter] = React.useState('');
+  const [kindFilter, setKindFilter] = React.useState('');
+  const [verdictFilter, setVerdictFilter] = React.useState('');
+  const [data, setData] = React.useState<MappingProposalsResult | null>(null);
+  const [conflictSummary, setConflictSummary] = React.useState<Record<string, number> | null>(null);
+  const [busyId, setBusyId] = React.useState('');
+  const [message, setMessage] = React.useState('');
+
+  const load = React.useCallback(() => {
+    const params = new URLSearchParams();
+    if (actionFilter) params.set('action', actionFilter);
+    if (kindFilter) params.set('decided_by_kind', kindFilter);
+    if (verdictFilter) params.set('verdict', verdictFilter);
+    api<MappingProposalsResult>(`/api/mappings/proposals?${params.toString()}`)
+      .then(setData)
+      .catch((err) => onError(String(err)));
+  }, [actionFilter, kindFilter, verdictFilter, onError]);
+
+  async function bulkRejectConflicts() {
+    if (!window.confirm('数値照合で明確に不一致（一致率10%以下）のmap提案を一括却下します。既存の確定判断は変更しません。実行しますか？')) return;
+    setMessage('一括却下を実行中...');
+    try {
+      const r = await api<{ rejected: number; candidates: number }>('/api/mappings/bulk-reject-conflicts', {
+        method: 'POST',
+        body: JSON.stringify({ reviewer: 'web_ui' }),
+      });
+      setMessage(`一括却下しました: ${r.rejected}件（候補${r.candidates}件）`);
+      load();
+    } catch (err) {
+      onError(String(err));
+      setMessage('');
+    }
+  }
+
+  React.useEffect(() => { load(); }, [load, refreshToken]);
+
+  React.useEffect(() => {
+    api<Record<string, number>>('/api/mappings/conflict-summary')
+      .then(setConflictSummary)
+      .catch(() => setConflictSummary(null));
+  }, [refreshToken]);
+
+  async function decide(mappingId: string, decision: 'confirm' | 'reject') {
+    if (decision === 'reject' && !window.confirm('この提案を却下します。よろしいですか？')) {
+      return;
+    }
+    setBusyId(mappingId);
+    setMessage('');
+    try {
+      await api(`/api/mappings/${encodeURIComponent(mappingId)}/${decision}`, {
+        method: 'POST',
+        body: JSON.stringify({ reviewer: 'web_ui' })
+      });
+      setMessage(decision === 'confirm' ? '承認しました。' : '却下しました。');
+      load();
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBusyId('');
+    }
+  }
+
+  const counts = data?.action_counts || {};
+
+  return (
+    <section className="stack">
+      <div className="panel automation-panel">
+        <div className="panel-head">
+          <div>
+            <h2>マッピング提案レビュー</h2>
+            <p className="muted">status=proposed のマッピング提案のみを表示します。承認済み・却下済みの既存判断は変更しません。</p>
+          </div>
+        </div>
+        <div className="automation-grid">
+          <div className="metric"><small>提案合計</small><strong>{data?.total ?? '-'}</strong></div>
+          <div className="metric"><small>map</small><strong>{counts.map ?? 0}</strong></div>
+          <div className="metric"><small>different_scope</small><strong>{counts.different_scope ?? 0}</strong></div>
+          <div className="metric"><small>ignore</small><strong>{counts.ignore ?? 0}</strong></div>
+          <div className="metric"><small>new_concept</small><strong>{counts.new_concept ?? 0}</strong></div>
+        </div>
+        <div className="toolbar">
+          <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+            <option value="">action: すべて</option>
+            <option value="map">map</option>
+            <option value="different_scope">different_scope</option>
+            <option value="ignore">ignore</option>
+            <option value="new_concept">new_concept</option>
+          </select>
+          <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
+            <option value="">判断主体: すべて</option>
+            <option value="ai">AI提案</option>
+            <option value="deterministic">決定的一致</option>
+          </select>
+          <select value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value)}>
+            <option value="">数値照合: すべて</option>
+            <option value="corroborated">一致（承認向き）</option>
+            <option value="conflicts">不一致（却下向き）</option>
+            <option value="unverifiable">照合不能</option>
+            <option value="weak">部分一致</option>
+          </select>
+          <button type="button" className="secondary danger-action" onClick={bulkRejectConflicts}>
+            矛盾を一括却下（一致率10%以下のmap）
+          </button>
+        </div>
+      </div>
+      {conflictSummary && (
+        <div className="panel automation-panel">
+          <div className="panel-head">
+            <div>
+              <h2>セル解決状況（参考）</h2>
+              <p className="muted">cell_resolutions の分布です（矛盾件数の把握用。マッピング提案とは別集計）。</p>
+            </div>
+          </div>
+          <div className="automation-grid">
+            {Object.entries(conflictSummary).map(([key, value]) => (
+              <div className="metric" key={key}><small>{key || '(未設定)'}</small><strong>{value}</strong></div>
+            ))}
+          </div>
+        </div>
+      )}
+      {message && <p className="hint">{message}</p>}
+      <div className="stack">
+        {(data?.proposals || []).map((p) => (
+          <div className="panel" key={p.mapping_id}>
+            <div className="panel-head">
+              <div>
+                <h3>{p.observed_item.label_ja || p.observed_item.element_local_name || p.observed_item.observed_item_id}</h3>
+                <p className="muted">
+                  {p.observed_item.element_id} / scope={p.observed_item.normalized_scope || '-'} / unit={p.observed_item.unit || '-'} / {p.observed_item.taxonomy_kind}
+                </p>
+              </div>
+              <span className={`badge ${p.decided_by_kind === 'ai' ? 'pending' : 'succeeded'}`}>
+                {p.decided_by_kind === 'ai' ? 'AI提案' : '決定的一致'}{p.confidence != null ? `(${p.confidence})` : ''}
+              </span>
+            </div>
+            <div className="grid">
+              <div>
+                <small>action</small>
+                <strong>{MAPPING_ACTION_LABELS[p.action] || p.action}</strong>
+              </div>
+              <div>
+                <small>マッピング先概念</small>
+                <strong>{p.concept?.concept_name_ja || p.new_concept_proposal?.concept_name_ja || '(なし/新概念)'}</strong>
+              </div>
+            </div>
+            {p.corroboration && (
+              <div className={`callout corroboration-${p.corroboration.verdict}`}>
+                <strong>
+                  数値照合: {CORROBORATION_VERDICT_LABELS[p.corroboration.verdict] || p.corroboration.verdict}
+                  {p.corroboration.overlap_count > 0
+                    ? ` — 一致 ${p.corroboration.match_count}/${p.corroboration.overlap_count}（${Math.round((p.corroboration.match_rate || 0) * 100)}%）`
+                    : ''}
+                </strong>
+                {(p.corroboration.examples || []).slice(0, 3).map((ex, idx) => (
+                  <div className="muted" key={idx} style={{ fontSize: '0.85em' }}>
+                    {ex.company_year_id}: 要素値={Number(ex.element_value).toLocaleString()} vs 概念値={Number(ex.concept_value).toLocaleString()} {ex.matched ? '✓' : '✗'}
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="hint">根拠: {p.rationale || '(記録なし)'}</p>
+            <div className="toolbar">
+              <button onClick={() => decide(p.mapping_id, 'confirm')} disabled={busyId === p.mapping_id}>承認</button>
+              <button className="ghost" onClick={() => decide(p.mapping_id, 'reject')} disabled={busyId === p.mapping_id}>却下</button>
+            </div>
+          </div>
+        ))}
+        {data && data.proposals.length === 0 && <Empty message="該当する提案はありません。" />}
+      </div>
+    </section>
+  );
+}
+
+const ALGORITHM_AUDIT_KIND_OPTIONS = [
+  'duplicate_tag',
+  'contradictory_mapping',
+  'low_coverage_concept',
+  'orphan_concept',
+  'unconfirmed_concept',
+  'review_section_debt',
+  'review_section_debt_summary'
+] as const;
+
+function AlgorithmAuditFindingsPanel({ onError, refreshToken }: { onError: (message: string) => void; refreshToken: number }) {
+  const [kindFilter, setKindFilter] = React.useState('');
+  const [severityFilter, setSeverityFilter] = React.useState('');
+  const [data, setData] = React.useState<AlgorithmAuditFindingsResult | null>(null);
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    api<AlgorithmAuditFindingsResult>('/api/algorithm-audit/findings')
+      .then(setData)
+      .catch((err) => onError(String(err)));
+  }, [onError]);
+
+  React.useEffect(() => { load(); }, [load, refreshToken]);
+
+  async function rebuild() {
+    setBusy(true);
+    try {
+      await api('/api/jobs/algorithm-audit-findings', { method: 'POST' });
+      window.setTimeout(load, 1500);
+    } catch (err) {
+      onError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const findings = (data?.findings || []).filter((f) =>
+    (!kindFilter || f.kind === kindFilter) && (!severityFilter || f.severity === severityFilter)
+  );
+
+  return (
+    <section className="stack">
+      <div className="panel automation-panel">
+        <div className="panel-head">
+          <div>
+            <h2>アルゴリズム監査findings</h2>
+            <p className="muted">決定的検出器（重複タグ／矛盾マッピング／低カバレッジ／孤立概念／review_*セクション残骸）の結果です。修正はここでは行いません。</p>
+          </div>
+          <button onClick={rebuild} disabled={busy}>{busy ? '生成中…' : '再生成'}</button>
+        </div>
+        {data?.status === 'not_built' && <p className="hint">まだ生成されていません。「再生成」を実行してください。</p>}
+        {data?.summary && (
+          <div className="automation-grid">
+            <div className="metric"><small>件数合計</small><strong>{data.summary.total}</strong></div>
+            {Object.entries(data.summary.by_kind).map(([k, v]) => (
+              <div className="metric" key={k}><small>{k}</small><strong>{v}</strong></div>
+            ))}
+          </div>
+        )}
+        <div className="toolbar">
+          <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
+            <option value="">kind: すべて</option>
+            {ALGORITHM_AUDIT_KIND_OPTIONS.map((kind) => (
+              <option key={kind} value={kind}>{kind}</option>
+            ))}
+          </select>
+          <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
+            <option value="">severity: すべて</option>
+            <option value="high">high</option>
+            <option value="medium">medium</option>
+            <option value="low">low</option>
+            <option value="info">info</option>
+          </select>
+        </div>
+      </div>
+      <div className="stack">
+        {findings.map((f) => (
+          <div className="panel" key={f.finding_id}>
+            <div className="panel-head">
+              <div>
+                <h3>{f.target}</h3>
+                <p className="muted">{f.kind}</p>
+              </div>
+              <span className={`badge ${f.severity === 'high' ? 'pending' : 'succeeded'}`}>{f.severity}</span>
+            </div>
+            <pre className="hint">{JSON.stringify(f.evidence, null, 2)}</pre>
+            <p className="hint">提案: {f.suggested_action}</p>
+          </div>
+        ))}
+        {data && data.status !== 'not_built' && findings.length === 0 && <Empty message="該当するfindingsはありません。" />}
+      </div>
+    </section>
+  );
+}
+
+function CorroborationSummaryPanel({ job, onJob, onError, jobRunning, refreshToken }: {
+  job: Job | null;
+  onJob: (job: Job) => void;
+  onError: (message: string) => void;
+  jobRunning: boolean;
+  refreshToken: number;
+}) {
+  const [summary, setSummary] = React.useState<CorroborationSummary | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  const loadSummary = React.useCallback(() => {
+    setLoading(true);
+    api<CorroborationSummary>('/api/corroboration/summary')
+      .then(setSummary)
+      .catch((err) => onError(String(err)))
+      .finally(() => setLoading(false));
+  }, [onError]);
+
+  React.useEffect(() => {
+    loadSummary();
+  }, [loadSummary, refreshToken]);
+
+  React.useEffect(() => {
+    if (!job?.id || job.status === 'running') return;
+    loadSummary();
+  }, [job?.id, job?.status, loadSummary]);
+
+  async function startRebuild() {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
+    try {
+      const next = await api<Job>('/api/jobs/corroboration-report', { method: 'POST' });
+      onJob(next);
+      window.setTimeout(loadSummary, 800);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  const built = Boolean(summary && summary.status !== 'not_built');
+  const message = !summary
+    ? (loading ? '証拠照合レポートを読み込み中です。' : '証拠照合レポートを読み込み中です。')
+    : built
+      ? '証拠照合レポートは生成済みです。'
+      : '証拠照合レポートはまだ生成されていません。';
+
+  const methodCounts = Object.entries(summary?.extraction_method_counts || {});
+  const ruleStatusEntries = Object.entries(summary?.validation_rule_status_counts || {});
+  const notes = summary?.notes || [];
+
+  return (
+    <div className="panel automation-panel">
+      <div className="panel-head">
+        <div>
+          <h2>証拠照合レポート</h2>
+          <p className="muted">{message}</p>
+        </div>
+        <span className={`badge ${built ? 'succeeded' : 'pending'}`}>{built ? '生成済み' : summary ? '未生成' : '確認中'}</span>
+      </div>
+      {built && (
+        <>
+          <div className="automation-grid">
+            <div className="metric">
+              <small>総セル数</small>
+              <strong>{summary?.cells_total ?? '-'}</strong>
+            </div>
+            <div className="metric">
+              <small>照合2件以上（自動確定候補）</small>
+              <strong className="text-ok">{summary?.corroborated_2plus ?? '-'}</strong>
+              <small>{corroborationPercent(summary?.corroborated_2plus, summary?.cells_total)}</small>
+            </div>
+            <div className="metric">
+              <small>照合1件</small>
+              <strong>{summary?.corroborated_1 ?? '-'}</strong>
+            </div>
+            <div className="metric">
+              <small>照合0件</small>
+              <strong className="text-warn">{summary?.corroborated_0 ?? '-'}</strong>
+              <small>{corroborationPercent(summary?.corroborated_0, summary?.cells_total)}</small>
+            </div>
+            <div className="metric">
+              <small>矛盾</small>
+              <strong className="text-warn">{summary?.conflicts ?? '-'}</strong>
+              <small>{corroborationPercent(summary?.conflicts, summary?.cells_total)}</small>
+            </div>
+            <div className="metric">
+              <small>自動確定かつ照合0件</small>
+              <strong className="text-warn">{summary?.auto_accepted_with_zero_corroboration ?? '-'}</strong>
+            </div>
+          </div>
+          {methodCounts.length > 0 && (
+            <div className="detail-section">
+              <h3>抽出方法別の件数</h3>
+              <div className="mini-table-wrap">
+                <table className="mini-table summary-mini-table">
+                  <thead>
+                    <tr>
+                      <th>抽出方法</th>
+                      <th>件数</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {methodCounts.map(([method, count]) => (
+                      <tr key={method}>
+                        <td>{method}</td>
+                        <td>{count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {ruleStatusEntries.length > 0 && (
+            <div className="detail-section">
+              <h3>検証ルール別の判定内訳</h3>
+              <div className="mini-table-wrap">
+                <table className="mini-table summary-mini-table">
+                  <thead>
+                    <tr>
+                      <th>検証ルール</th>
+                      <th>fail</th>
+                      <th>pass</th>
+                      <th>not_applicable</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ruleStatusEntries.map(([rule, counts]) => (
+                      <tr key={rule}>
+                        <td>{rule}</td>
+                        <td className={counts.fail ? 'text-warn' : ''}>{counts.fail ?? 0}</td>
+                        <td className="text-ok">{counts.pass ?? 0}</td>
+                        <td>{counts.not_applicable ?? 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {notes.length > 0 && (
+            <div className="detail-section">
+              <h3>注意事項</h3>
+              <ul className="note-list">
+                {notes.map((note, index) => (
+                  <li key={index}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
+      )}
+      {jobRunning && <p className="hint action-lock">ジョブ実行中です。完了まで新しい実行操作はできません。</p>}
+      <div className="toolbar annual-toolbar">
+        <button onClick={startRebuild} disabled={jobRunning}>照合レポートを再生成</button>
+      </div>
+    </div>
+  );
+}
+
 function reviewRowKey(row: Row): string {
   return `${String(row.company_year_id || '')}::${String(row.field_id || '')}`;
+}
+
+function companyIdFromCompanyYear(companyYearId: string): string {
+  const index = companyYearId.lastIndexOf('_');
+  return index > 0 ? companyYearId.slice(0, index) : '';
+}
+
+function yearFromReviewRow(row: Row): number | null {
+  const direct = Number(row.fiscal_year);
+  if (Number.isFinite(direct)) return direct;
+  const companyYearId = String(row.company_year_id || '');
+  const index = companyYearId.lastIndexOf('_');
+  if (index < 0) return null;
+  const fromId = Number(companyYearId.slice(index + 1));
+  return Number.isFinite(fromId) ? fromId : null;
+}
+
+function notApplicableRange(scope: string, fiscalYear: number | null): { startYear: number | null; endYear: number | null; label: string } {
+  if (fiscalYear == null) return { startYear: null, endYear: null, label: '全年度' };
+  if (scope === 'selected_year') return { startYear: fiscalYear, endYear: fiscalYear, label: `${fiscalYear}年度のみ` };
+  if (scope === 'until_selected_year') return { startYear: null, endYear: fiscalYear, label: `${fiscalYear}年度以前` };
+  if (scope === 'after_selected_year') return { startYear: fiscalYear + 1, endYear: null, label: `${fiscalYear + 1}年度以降` };
+  if (scope === 'before_selected_year') return { startYear: null, endYear: fiscalYear - 1, label: `${fiscalYear - 1}年度以前` };
+  if (scope === 'all_years') return { startYear: null, endYear: null, label: '全年度' };
+  return { startYear: fiscalYear, endYear: null, label: `${fiscalYear}年度以降` };
 }
 
 function DataTable({
@@ -2341,10 +5421,13 @@ function DataTable({
   onCellClick,
   onRowClick,
   selectedRowKey = '',
+  selectedRowKeys,
   getRowKey,
-  rowActionLabel = '',
+  selectableRows = false,
+  onRowSelectionToggle,
   compact = false,
-  markEmptyCells = false
+  markEmptyCells = false,
+  clampAllCells = false
 }: {
   data: Row[];
   columns: string[];
@@ -2352,32 +5435,66 @@ function DataTable({
   onCellClick?: (row: Row, column: string) => void;
   onRowClick?: (row: Row) => void;
   selectedRowKey?: string;
+  selectedRowKeys?: Set<string>;
   getRowKey?: (row: Row) => string;
-  rowActionLabel?: string;
+  selectableRows?: boolean;
+  onRowSelectionToggle?: (row: Row) => void;
   compact?: boolean;
   markEmptyCells?: boolean;
+  clampAllCells?: boolean;
 }) {
-  const defs = React.useMemo<ColumnDef<Row>[]>(() => columns.map((column) => ({
-    accessorKey: column,
-    header: columnLabels[column] || column,
-    cell: (info) => {
-      const rawValue = info.getValue();
-      const value = String(rawValue ?? '');
-      if (markEmptyCells && !baseColumns.has(column) && value.trim() === '') {
-        return <span className="empty-cell">空欄</span>;
+  const defs = React.useMemo<ColumnDef<Row>[]>(() => {
+    const valueColumns: ColumnDef<Row>[] = columns.map((column): ColumnDef<Row> => ({
+      accessorKey: column,
+      header: columnLabels[column] || column,
+      cell: (info) => {
+        const rawValue = info.getValue();
+        const value = String(rawValue ?? '');
+        if (markEmptyCells && !baseColumns.has(column) && value.trim() === '') {
+          return <span className="empty-cell">空欄</span>;
+        }
+        if (clampAllCells && column !== 'candidate_status' && column !== 'review_saved' && column !== 'applied_status') {
+          return renderClampedText(rawValue);
+        }
+        return renderCellValue(column, rawValue);
       }
-      return renderCellValue(column, rawValue);
+    }));
+    if (!selectableRows) {
+      return valueColumns;
     }
-  })), [columns, columnLabels, markEmptyCells]);
+    const selectionColumn: ColumnDef<Row> = {
+      id: '__select',
+      header: '',
+      cell: (info) => {
+        const row = info.row.original;
+        const key = getRowKey?.(row) || '';
+        return (
+          <input
+            type="checkbox"
+            aria-label="選択"
+            checked={Boolean(key && selectedRowKeys?.has(key))}
+            onChange={(event) => {
+              event.stopPropagation();
+              onRowSelectionToggle?.(row);
+            }}
+            onClick={(event) => event.stopPropagation()}
+          />
+        );
+      }
+    };
+    return [
+      selectionColumn,
+      ...valueColumns
+    ];
+  }, [columns, columnLabels, markEmptyCells, clampAllCells, selectableRows, selectedRowKeys, getRowKey, onRowSelectionToggle]);
   const table = useReactTable({ data, columns: defs, getCoreRowModel: getCoreRowModel() });
   if (!data.length) return <Empty message="該当する行がありません。" />;
   return (
-    <div className={`table-wrap ${compact ? 'compact' : ''}`}>
+    <div className={`table-wrap ${compact ? 'compact' : ''} ${clampAllCells ? 'clamp-all-cells' : ''}`}>
       <table>
         <thead>
           {table.getHeaderGroups().map((group) => (
             <tr key={group.id}>
-              {rowActionLabel && <th className="row-action-head">操作</th>}
               {group.headers.map((header) => (
                 <th key={header.id}>{flexRender(header.column.columnDef.header, header.getContext())}</th>
               ))}
@@ -2390,24 +5507,11 @@ function DataTable({
               key={row.id}
               className={[
                 onRowClick ? 'row-clickable' : '',
-                selectedRowKey && getRowKey?.(row.original) === selectedRowKey ? 'row-selected' : ''
+                selectedRowKey && getRowKey?.(row.original) === selectedRowKey ? 'row-selected' : '',
+                selectedRowKeys?.has(getRowKey?.(row.original) || '') ? 'row-selected' : ''
               ].filter(Boolean).join(' ')}
               onClick={() => onRowClick?.(row.original)}
             >
-              {rowActionLabel && (
-                <td className="row-action-cell">
-                  <button
-                    type="button"
-                    className="ghost row-action-button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRowClick?.(row.original);
-                    }}
-                  >
-                    {rowActionLabel}
-                  </button>
-                </td>
-              )}
               {row.getVisibleCells().map((cell) => (
                 <td key={cell.id} className={onCellClick ? 'cell-clickable' : ''} onClick={(event) => {
                   if (onCellClick) {
@@ -2478,12 +5582,40 @@ const miniColumnLabels: Record<string, string> = {
   applied_at: '反映日時'
 };
 
-function Pager({ page, totalPages, total, onPage }: { page: number; totalPages: number; total: number; onPage: (page: number) => void }) {
+const sourceSummaryColumnLabels: Record<string, string> = {
+  company_name: '会社',
+  period: '年度/月',
+  field_name: '項目',
+  value: '値',
+  unit: '単位',
+  unit_normalized: '単位',
+  data_scope: 'スコープ',
+  source_file: '出典ファイル',
+  source_heading: '見出し',
+  source_quote: '引用',
+  extraction_method: '抽出方法',
+  confidence: '信頼度'
+};
+
+function Pager({
+  page,
+  totalPages,
+  total,
+  onPage,
+  itemLabel = ''
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  onPage: (page: number) => void;
+  itemLabel?: string;
+}) {
+  const prefix = itemLabel ? `${itemLabel}` : '';
   return (
     <div className="pager">
-      <button className="ghost" disabled={page <= 1} onClick={() => onPage(page - 1)}>前へ</button>
+      <button className="ghost" disabled={page <= 1} onClick={() => onPage(page - 1)}>{prefix}前へ</button>
       <span>{page} / {totalPages}（{total}件）</span>
-      <button className="ghost" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>次へ</button>
+      <button className="ghost" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>{prefix}次へ</button>
     </div>
   );
 }
@@ -2513,6 +5645,64 @@ function split(value: string) {
   return value.split(',').map((part) => part.trim()).filter(Boolean);
 }
 
+function splitTerms(value: string) {
+  return value.split(/[;\n,]+/).map((part) => part.trim()).filter(Boolean);
+}
+
+function firstTerm(value: string): string {
+  return splitTerms(value)[0] || '';
+}
+
+function mappingStatusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    unmapped: '未判断',
+    candidate: '確認中',
+    accepted: '採用',
+    separate: '別管理',
+    rejected: '使わない'
+  };
+  return labels[value] || value || '未判断';
+}
+
+function clampNumber(value: string, min: number, max: number, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function chartExportFileName(extension: 'png' | 'svg' | 'csv'): string {
+  const now = new Date();
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+  ].join('');
+  return `yuho-chart-${stamp}.${extension}`;
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function downloadText(text: string, fileName: string) {
+  const blob = new Blob(['\ufeff', text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 const chartColors = [
   '#0f5f66',
   '#d97917',
@@ -2532,8 +5722,153 @@ function chartFieldEligible(field: FieldOption): boolean {
   return !id.includes('note') && !name.includes('注記');
 }
 
+function fieldCategoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    performance: '財務・収益',
+    orders: '受注・完成・繰越',
+    segment_orders: 'セグメント受注',
+    expense: '費用',
+    assets: '資産・資本',
+    financial_position: '財政状態',
+    human_capital: '人員・技術者',
+    people: '人員・技術者',
+    cost: '原価',
+    construction: '完成工事',
+    segment: 'セグメント',
+    derived_ratio: '比率・派生',
+    market_price: '株価',
+    market_volume: '出来高',
+    market_return: 'リターン',
+    market_event: '配当・分割',
+    market_value: '時価総額',
+    use: '用途別',
+    business_scope: '建築/土木等',
+    company_factbook: 'ファクトブック',
+  };
+  return labels[category] || category || '未分類';
+}
+
+function choiceItemGroups(items: Array<{ id: string; label: string; name?: string; category?: string }>) {
+  const groups: Array<{ key: string; label: string; items: Array<{ id: string; label: string; name?: string; category?: string }> }> = [];
+  const byKey = new Map<string, { key: string; label: string; items: Array<{ id: string; label: string; name?: string; category?: string }> }>();
+  for (const item of items) {
+    const key = item.category || 'uncategorized';
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label: fieldCategoryLabel(item.category || ''), items: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+  return groups;
+}
+
+function fieldOptionGroups(fields: FieldOption[]) {
+  return choiceItemGroups(fields.map((field) => ({ ...field, category: field.category }))).map((group) => ({
+    key: group.key,
+    label: group.label,
+    items: group.items as FieldOption[],
+  }));
+}
+
+function chartSelectionMessage(source: ChartSource, viewMode: ChartViewMode, kind: ChartKind): string {
+  const period = source === 'stock' ? '月' : '年度';
+  if (viewMode === 'chart' && kind === 'scatter') {
+    return `会社、${period}、X軸、Y軸を選択してください。`;
+  }
+  return `会社、${period}、項目を選択してください。`;
+}
+
+function buildAnalysisTableRows(
+  rows: Row[],
+  fields: string[],
+  fieldsById: Map<string, FieldOption>,
+  source: ChartSource,
+  selectedPeriods: string[],
+  companies: CompanyOption[],
+): AnalysisTableData {
+  const fieldId = fields[0] || '';
+  const field = fieldsById.get(fieldId);
+  const periodColumns = selectedPeriods.slice().sort(comparePeriod);
+  const columns = fieldId ? ['company', ...periodColumns] : [];
+  const labels: Record<string, string> = {
+    company: '会社名',
+  };
+  for (const period of periodColumns) {
+    labels[period] = `${period}${source === 'stock' ? '' : '年度'}`;
+  }
+  const companyOrder = new Map(companies.map((company, index) => [company.id, index]));
+  const byCompany = new Map<string, Row>();
+  for (const row of rows) {
+    const companyId = String(row.operating_company_id || '');
+    const companyName = String(row.operating_company_name || companyId);
+    const period = String(source === 'stock' ? row.month || row.fiscal_year || '' : row.fiscal_year || '');
+    if (!companyId || !period || !periodColumns.includes(period)) {
+      continue;
+    }
+    const out = byCompany.get(companyId) || { company: companyName, __company_order: companyOrder.get(companyId) ?? byCompany.size };
+    const rawValue = row[`${fieldId}__raw`];
+    out[period] = formatTableValue(String(rawValue ?? '').trim() ? rawValue : row[fieldId]);
+    byCompany.set(companyId, out);
+  }
+  const tableRows = Array.from(byCompany.values())
+    .sort((a, b) => Number(a.__company_order ?? 0) - Number(b.__company_order ?? 0))
+    .map((row) => {
+      const copied = { ...row };
+      delete copied.__company_order;
+      return copied;
+    });
+  return { rows: tableRows, columns, labels, fieldName: field?.name || fieldId, unit: field?.unit || '' };
+}
+
+function formatTableValue(value: unknown): string {
+  if (value == null) return '';
+  const number = tableNumericValue(value);
+  if (number == null) return String(value);
+  return new Intl.NumberFormat('ja-JP', { maximumFractionDigits: 4 }).format(number);
+}
+
+function tableNumericValue(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+  const normalized = text
+    .replace(/,/g, '')
+    .replace(/％/g, '%')
+    .replace(/−/g, '-')
+    .replace(/△/g, '-')
+    .replace(/▲/g, '-')
+    .replace(/%/g, '');
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : null;
+}
+
+function toCsv(rows: Row[], columns: string[], labels: Record<string, string>): string {
+  const lines = [columns.map((column) => csvCell(labels[column] || column)).join(',')];
+  for (const row of rows) {
+    lines.push(columns.map((column) => csvCell(row[column])).join(','));
+  }
+  return lines.join('\n');
+}
+
+function csvCell(value: unknown): string {
+  const text = String(value ?? '');
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
 function toggleValue(values: string[], value: string): string[] {
   return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
+
+function toggleSingleValue(values: string[], value: string): string[] {
+  return values[0] === value ? [] : [value];
 }
 
 function getSeriesRenderKind(kind: ChartKind, index: number, style: SeriesStyle = {}): SeriesRenderKind {
@@ -2542,16 +5877,82 @@ function getSeriesRenderKind(kind: ChartKind, index: number, style: SeriesStyle 
   return 'line';
 }
 
-function chartTitle(kind: ChartKind, mode: ChartMode): string {
+function chartMargin(settings: ExportSettings, hasRightAxis: boolean) {
+  const base = exportMarginPresets[settings.marginPreset];
+  const directLabelSpace = settings.directLineLabels ? 96 : 0;
+  const legendRightSpace = settings.legendPosition === 'right' ? 118 : 0;
+  return {
+    top: base.top,
+    right: base.right + (hasRightAxis ? 30 : 0) + directLabelSpace + legendRightSpace,
+    bottom: base.bottom,
+    left: base.left,
+  };
+}
+
+function chartLegendProps(settings: ExportSettings, fontSize: number): Record<string, unknown> | null {
+  if (settings.legendPosition === 'none') return null;
+  const baseStyle = {
+    color: designPresets[settings.designPreset].text,
+    fontSize,
+    fontWeight: 700,
+  };
+  if (settings.legendPosition === 'right') {
+    return {
+      align: 'right',
+      verticalAlign: 'middle',
+      layout: 'vertical',
+      wrapperStyle: { ...baseStyle, paddingLeft: 14, lineHeight: '1.5' },
+    };
+  }
+  return {
+    align: 'center',
+    verticalAlign: settings.legendPosition,
+    layout: 'horizontal',
+    wrapperStyle: {
+      ...baseStyle,
+      paddingTop: settings.legendPosition === 'bottom' ? 12 : 0,
+      paddingBottom: settings.legendPosition === 'top' ? 12 : 0,
+    },
+  };
+}
+
+function lastValueIndexes(rows: Row[], series: ChartSeries[]): Record<string, number> {
+  const indexes: Record<string, number> = {};
+  for (const item of series) {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      if (numericValue(rows[index]?.[item.key]) != null) {
+        indexes[item.key] = index;
+        break;
+      }
+    }
+  }
+  return indexes;
+}
+
+function chartTitle(kind: ChartKind, mode: ChartMode, source: ChartSource = 'financial'): string {
   if (kind === 'scatter') return '散布図';
   if (mode === 'company') {
-    if (kind === 'bar') return '会社比較 棒グラフ';
-    if (kind === 'combo') return '会社比較 複合グラフ';
-    return '会社比較 折れ線';
+    const prefix = source === 'stock' ? '会社・月比較' : source === 'factbook_orders' ? '受注カテゴリ会社比較' : '会社比較';
+    if (kind === 'bar') return `${prefix} 棒グラフ`;
+    if (kind === 'combo') return `${prefix} 複合グラフ`;
+    return `${prefix} 折れ線`;
   }
-  if (kind === 'bar') return '年度推移 棒グラフ';
-  if (kind === 'combo') return '年度推移 複合グラフ';
-  return '年度推移 折れ線';
+  const prefix = source === 'stock' ? '月次推移' : source === 'factbook_orders' ? '受注カテゴリ年度推移' : '年度推移';
+  if (kind === 'bar') return `${prefix} 棒グラフ`;
+  if (kind === 'combo') return `${prefix} 複合グラフ`;
+  return `${prefix} 折れ線`;
+}
+
+function chartSourceLabel(source: ChartSource): string {
+  if (source === 'stock') return ' / 月次株価';
+  if (source === 'factbook_orders') return ' / ファクトブック受注';
+  return ' / 有報';
+}
+
+function factbookCategoryTypeLabel(value: string): string {
+  if (value === 'use') return '用途別';
+  if (value === 'business_scope') return '建築/土木等';
+  return value || '未分類';
 }
 
 function buildTrendChartRows(
@@ -2587,7 +5988,7 @@ function buildTrendChartRows(
     }
   }
   return {
-    rows: Array.from(byYear.values()).sort((a, b) => Number(a.fiscal_year) - Number(b.fiscal_year)),
+    rows: Array.from(byYear.values()).sort((a, b) => comparePeriod(a.fiscal_year, b.fiscal_year)),
     series: Array.from(seriesByKey.values()),
   };
 }
@@ -2658,6 +6059,17 @@ function trendSeriesLabel(row: Row, field: FieldOption | undefined, fieldCount: 
 
 function chartSeriesKey(prefix: string, companyId: string, fieldId: string): string {
   return [prefix, companyId, fieldId].map((value) => value.replace(/[^a-zA-Z0-9_]+/g, '_')).join('__');
+}
+
+function comparePeriod(a: unknown, b: unknown): number {
+  const left = String(a || '');
+  const right = String(b || '');
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return leftNumber - rightNumber;
+  }
+  return left.localeCompare(right);
 }
 
 function numericValue(value: unknown): number | null {

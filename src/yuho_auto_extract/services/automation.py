@@ -28,7 +28,14 @@ DEFAULT_AUTOMATION_CONFIG: Dict[str, Any] = {
             "max_active_review_items": 0,
             "max_saved_unapplied_reviews": 0,
             "require_final_outputs": True,
-            "require_algorithm_audit": False,
+            "require_algorithm_audit": True,
+            "algorithm_audit_max_age_days": 14,
+            # P3: 既定はFalse。既存の automation.py 呼び出し元・テストの後方互換性を
+            # 壊さないため、実運用での有効化は config/automation.yml 側の明示的な
+            # require_regression_pass: true で行う（algorithm_audit も同様の非対称
+            # デフォルトだが、そちらは既にYAML側でTrueに明示されている）。
+            "require_regression_pass": False,
+            "regression_max_age_days": 14,
         },
     },
     "roll_forward": {
@@ -36,6 +43,22 @@ DEFAULT_AUTOMATION_CONFIG: Dict[str, Any] = {
         "copy_latest_company_year_per_company": True,
         "reset_transition_year_flag": True,
         "clear_event_fields": True,
+    },
+    "stock_price_monthly": {
+        "enabled": True,
+        "provider": "yahoo_finance_chart",
+        "cadence": "monthly",
+        "run_day_of_month": 5,
+        "include_current_month": False,
+        "initial_start_date": "2015-01-01",
+        "request_timeout_seconds": 30,
+        "retry_count": 2,
+        "retry_backoff_seconds": 2,
+        "polite_sleep_seconds": 0.25,
+        "scheduler_check_interval_seconds": 21600,
+        "user_agent": "Mozilla/5.0 BuildBase/stock-monthly",
+        "canonical_store": "data/marts/market/stock_price_monthly.csv",
+        "raw_store": "data/raw/market/yahoo_chart",
     },
 }
 
@@ -140,7 +163,9 @@ def review_gate_status(root: Path, cfg: Optional[Dict[str, Any]] = None) -> Dict
         "field_coverage": (root / "data" / "final" / "field_coverage.csv").exists(),
     }
     report = parse_run_report(root / "data" / "final" / "run_report.md")
-    algorithm_audit_exists = (root / "data" / "algorithm_audit" / "manifest.json").exists()
+    algorithm_audit = _algorithm_audit_gate_status(root, gate_cfg)
+    algorithm_audit_exists = bool(algorithm_audit.get("exists"))
+    regression = _regression_gate_status(root, gate_cfg)
     max_active = int(gate_cfg.get("max_active_review_items", 0))
     max_saved_unapplied = int(gate_cfg.get("max_saved_unapplied_reviews", 0))
     blocking: List[str] = []
@@ -152,8 +177,24 @@ def review_gate_status(root: Path, cfg: Optional[Dict[str, Any]] = None) -> Dict
         missing_outputs = [name for name, ok in final_outputs.items() if not ok]
         if missing_outputs:
             blocking.append(f"missing_final_outputs={','.join(missing_outputs)}")
-    if bool(gate_cfg.get("require_algorithm_audit", False)) and not algorithm_audit_exists:
-        blocking.append("algorithm_audit_missing")
+    if bool(gate_cfg.get("require_algorithm_audit", False)):
+        if not algorithm_audit_exists:
+            blocking.append("algorithm_audit_missing")
+        elif algorithm_audit.get("stale"):
+            blocking.append(
+                "algorithm_audit_stale="
+                f"{algorithm_audit.get('age_days', '-')}d exceeds {algorithm_audit.get('max_age_days', '-')}d"
+            )
+    if bool(gate_cfg.get("require_regression_pass", False)):
+        if not regression.get("exists"):
+            blocking.append("regression_missing")
+        elif regression.get("stale"):
+            blocking.append(
+                "regression_stale="
+                f"{regression.get('age_days', '-')}d exceeds {regression.get('max_age_days', '-')}d"
+            )
+        elif int(regression.get("mismatch_count") or 0) > 0:
+            blocking.append(f"regression_mismatch_count={regression.get('mismatch_count')}")
 
     return {
         "ready": not blocking,
@@ -164,6 +205,8 @@ def review_gate_status(root: Path, cfg: Optional[Dict[str, Any]] = None) -> Dict
         "resolved_reviews": len(resolved_rows),
         "final_outputs": final_outputs,
         "algorithm_audit_exists": algorithm_audit_exists,
+        "algorithm_audit": algorithm_audit,
+        "regression": regression,
         "run_report_summary": report.get("summary", {}),
     }
 
@@ -331,7 +374,87 @@ def _is_resolved_done(row: Optional[Dict[str, Any]]) -> bool:
     if not row:
         return False
     status = str(row.get("applied_status", "") or "").strip().lower()
-    return status in {"applied", "rejected"}
+    if status in {"applied", "rejected", "not_applicable"}:
+        return True
+    return str(row.get("review_decision", "") or "").strip().lower() == "not_applicable"
+
+
+def _algorithm_audit_gate_status(root: Path, gate_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    max_age_days = int(gate_cfg.get("algorithm_audit_max_age_days") or 0)
+    manifest_path = root / "data" / "algorithm_audit" / "manifest.json"
+    status: Dict[str, Any] = {
+        "exists": manifest_path.exists(),
+        "generated_at_utc": "",
+        "age_days": None,
+        "max_age_days": max_age_days,
+        "stale": False,
+    }
+    if not manifest_path.exists():
+        return status
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        status["stale"] = bool(max_age_days)
+        return status
+    generated_at = str(manifest.get("generated_at_utc") or "")
+    status["generated_at_utc"] = generated_at
+    generated_dt = _parse_utc_datetime(generated_at)
+    if generated_dt is None:
+        status["stale"] = bool(max_age_days)
+        return status
+    age_days = max(0.0, (datetime.now(timezone.utc) - generated_dt).total_seconds() / 86400)
+    status["age_days"] = round(age_days, 1)
+    if max_age_days > 0 and age_days > max_age_days:
+        status["stale"] = True
+    return status
+
+
+def _regression_gate_status(root: Path, gate_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """_algorithm_audit_gate_status と同じ manifest(summary)+staleness パターン。"""
+    max_age_days = int(gate_cfg.get("regression_max_age_days") or 0)
+    summary_path = root / "data" / "reports" / "regression_summary.json"
+    status: Dict[str, Any] = {
+        "exists": summary_path.exists(),
+        "generated_at_utc": "",
+        "age_days": None,
+        "max_age_days": max_age_days,
+        "stale": False,
+        "mismatch_count": None,
+    }
+    if not summary_path.exists():
+        return status
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        status["stale"] = bool(max_age_days)
+        return status
+    status["mismatch_count"] = int(summary.get("mismatch_count", 0) or 0)
+    generated_at = str(summary.get("generated_at_utc") or "")
+    status["generated_at_utc"] = generated_at
+    generated_dt = _parse_utc_datetime(generated_at)
+    if generated_dt is None:
+        status["stale"] = bool(max_age_days)
+        return status
+    age_days = max(0.0, (datetime.now(timezone.utc) - generated_dt).total_seconds() / 86400)
+    status["age_days"] = round(age_days, 1)
+    if max_age_days > 0 and age_days > max_age_days:
+        status["stale"] = True
+    return status
+
+
+def _parse_utc_datetime(value: str) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _record_key(row: Dict[str, Any], key_fields: Sequence[str]) -> Tuple[str, ...]:

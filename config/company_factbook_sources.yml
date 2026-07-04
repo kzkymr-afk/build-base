@@ -1,0 +1,447 @@
+enabled: true
+canonical_store: data/marts/company_factbooks/building_orders_by_category.csv
+source_document_store: data/marts/company_factbooks/source_documents.csv
+raw_store: data/raw/company_factbooks
+request_timeout_seconds: 30
+retry_count: 2
+retry_backoff_seconds: 2
+polite_sleep_seconds: 0.25
+user_agent: "Mozilla/5.0 BuildBase/company-factbooks"
+
+category_labels:
+  office: 事務所
+  factory: 工場・生産施設
+  housing: 住宅
+  commercial: 商業施設・店舗
+  medical_welfare: 医療・福祉
+  education_research: 教育・研究
+  lodging: 宿泊施設
+  logistics: 倉庫・流通施設
+  public_cultural: 公共・文化施設
+  other_use: その他用途
+  domestic_building: 国内建築
+  domestic_civil: 国内土木
+  overseas_building: 海外建築
+  overseas_civil: 海外土木
+  development_other: 開発事業等
+
+category_keyword_map:
+  office:
+    - 事務所
+    - オフィス
+    - オフィスビル
+    - 事務所ビル
+    - 庁舎
+  factory:
+    - 工場
+    - 生産
+    - 産業
+    - 生産施設
+  housing:
+    - 住宅
+    - マンション
+  commercial:
+    - 店舗
+    - 商業
+    - 商業施設
+  medical_welfare:
+    - 医療
+    - 福祉
+    - 病院
+  education_research:
+    - 教育
+    - 学校
+    - 研究
+  lodging:
+    - 宿泊
+    - ホテル
+  logistics:
+    - 物流
+    - ロジスティクス
+    - 物流施設
+    - 倉庫
+    - 流通施設
+    - 流通センター
+  public_cultural:
+    - 公共
+    - 文化
+    - 庁舎
+  domestic_building:
+    - 国内建築
+  domestic_civil:
+    - 国内土木
+  overseas_building:
+    - 海外建築
+  overseas_civil:
+    - 海外土木
+  development_other:
+    - 開発事業
+    - 開発事業等
+
+manual_csv_globs:
+  - data/raw/company_factbooks/manual/*.csv
+
+validation:
+  absolute_tolerance_million_yen: 100
+  relative_tolerance: 0.005
+
+target_metrics:
+  - id: building_orders_by_use
+    name: 建築用途別受注高
+  - id: completed_building_by_use
+    name: 建築用途別完工高
+
+common_use_categories:
+  - id: office
+    label: 事務所
+  - id: logistics
+    label: 倉庫・流通施設
+  - id: factory
+    label: 工場・生産施設
+  - id: housing
+    label: 住宅
+  - id: commercial
+    label: 商業施設・店舗
+  - id: medical_welfare
+    label: 医療・福祉
+  - id: education_research
+    label: 教育・研究
+  - id: lodging
+    label: 宿泊施設
+  - id: public_cultural
+    label: 公共・文化施設
+  - id: other_use
+    label: その他用途
+
+document_source_defaults:
+  enabled: true
+  parser: link_index
+  follow_links: true
+  max_follow_links: 10
+  source_doc_type: factbook_or_ir_data
+  source_metric_id: building_use_metrics
+  target_metric_ids:
+    - building_orders_by_use
+    - completed_building_by_use
+  category_type: use
+  scope: mixed
+  business_scope: building
+  link_text_includes:
+    - ファクト
+    - FACT
+    - Fact
+    - ＦＡＣＴ
+    - データブック
+    - データ
+    - 建築
+    - 用途別
+    - 用途
+    - 受注
+    - 完工
+    - 完成工事
+    - 完成高
+    - 決算説明
+    - 決算補足
+    - 決算参考
+    - 補足資料
+    - 決算資料
+  href_includes:
+    - .pdf
+    - .xls
+    - .xlsx
+    - .csv
+    - .zip
+  follow_link_text_includes:
+    - ファクト
+    - FACT
+    - Fact
+    - ＦＡＣＴ
+    - データブック
+    - データ
+    - 決算説明
+    - 決算補足
+    - 決算参考
+    - 決算資料
+    - IRライブラ
+    - IR資料
+    - 決算関連
+  follow_href_includes:
+    - fact
+    - data
+    - databook
+    - library
+    - ir
+    - presentation
+    - results
+    - summary
+    - archives
+    - documents
+    - investor
+  note: "建築の用途別受注高・用途別完工高を最優先ターゲットにした公式資料候補。非開示企業もあるため、候補有無と未解析状態を分けて管理する。PDF/旧xlsは資料候補として保存し、構造化パーサ追加後に値抽出する。"
+
+company_document_sources:
+  - id: maeda_factbook_documents
+    company_id: MAEDA
+    company_name: 前田建設工業
+    source_page_url: https://www.maeda.co.jp/ir/report/factbook.html
+    source_dataset_id: maeda_factbook
+    source_doc_type: factbook
+
+  - id: smcc_databook_documents
+    company_id: SMCC
+    company_name: 三井住友建設
+    source_page_url: https://www.smcon.co.jp/investor/library/databook/
+    source_dataset_id: smcc_databook
+    source_doc_type: databook
+
+  - id: infr_factbook_documents
+    company_id: INFR
+    company_name: インフロニア・ホールディングス
+    source_page_url: https://www.infroneer.com/jp/ir/factbook/
+    source_dataset_id: infr_factbook
+    source_doc_type: factbook
+
+  - id: kajima_factbook_all_documents
+    company_id: KAJIMA
+    company_name: 鹿島建設
+    source_page_url: https://www.kajima.co.jp/ir/fact/index-j.html
+    source_dataset_id: kajima_factbook_all
+    source_doc_type: factbook
+
+  - id: taisei_databook_documents
+    company_id: TAISEI
+    company_name: 大成建設
+    source_page_url: https://www.taisei.co.jp/ir/data/databook/
+    source_dataset_id: taisei_databook
+    source_doc_type: databook
+
+  - id: obayashi_databook_documents
+    company_id: OBAYASHI
+    company_name: 大林組
+    source_page_url: https://ir.obayashi.co.jp/ja/ir/data/databook.html
+    source_dataset_id: obayashi_databook
+    source_doc_type: databook
+
+  - id: shimizu_databook_documents
+    company_id: SHIMIZU
+    company_name: 清水建設
+    source_page_url: https://www.shimz.co.jp/company/ir/library/data/
+    source_dataset_id: shimizu_databook
+    source_doc_type: databook
+
+  - id: takenaka_results_documents
+    company_id: TAKENAKA
+    company_name: 竹中工務店
+    source_page_url: https://www.takenaka.co.jp/corp/bspl/
+    source_dataset_id: takenaka_securities_reports
+    source_doc_type: securities_report
+    link_text_includes:
+      - 有価証券報告書
+      - 第
+      - PDF
+    href_includes:
+      - /corp/bspl/pdf/
+
+  - id: toda_factbook_documents
+    company_id: TODA
+    company_name: 戸田建設
+    source_page_url: https://www.toda.co.jp/ir/fact/
+    source_dataset_id: toda_factbook
+    source_doc_type: factbook
+
+  - id: nishimatsu_factbook_documents
+    company_id: NISHIMATSU
+    company_name: 西松建設
+    source_page_url: https://www.nishimatsu.co.jp/ir/library/factbook.html
+    source_dataset_id: nishimatsu_factbook
+    source_doc_type: factbook
+
+  - id: ando_hazama_factbook_documents
+    company_id: ANDO_HAZAMA
+    company_name: 安藤・間
+    source_page_url: https://www.ad-hzm.co.jp/ir/factbook/
+    source_dataset_id: ando_hazama_factbook
+    source_doc_type: factbook
+
+  - id: penta_factbook_documents
+    company_id: PENTA
+    company_name: 五洋建設
+    source_page_url: https://www.penta-ocean.co.jp/ir/data/factbook/index.html
+    source_dataset_id: penta_factbook
+    source_doc_type: factbook
+
+  - id: kumagai_results_documents
+    company_id: KUMAGAI
+    company_name: 熊谷組
+    source_page_url: https://www.kumagaigumi.co.jp/ir/library/summary-date/index.html
+    source_dataset_id: kumagai_results_reference
+    source_doc_type: results_reference
+
+  - id: haseko_presentation_documents
+    company_id: HASEKO
+    company_name: 長谷工コーポレーション
+    source_page_url: https://www.haseko.co.jp/hc/ir/library/presentation.html
+    source_dataset_id: haseko_presentation
+    source_doc_type: results_reference
+
+  - id: tokyu_library_documents
+    company_id: TOKYU
+    company_name: 東急建設
+    source_page_url: https://www.tokyu-cnst.co.jp/ir/library/
+    source_dataset_id: tokyu_ir_library
+    source_doc_type: results_reference
+    follow_link_text_includes:
+      - 決算情報
+      - 有価証券報告書
+      - 説明会資料
+    follow_href_includes:
+      - /ir/library/earning/
+      - /ir/library/securities/
+    link_text_includes:
+      - 決算説明
+      - 説明会資料
+      - 決算短信
+      - 有価証券報告書
+      - 内部統制報告書
+    href_includes:
+      - .pdf
+
+  - id: okumura_results_documents
+    company_id: OKUMURA
+    company_name: 奥村組
+    source_page_url: https://www.okumuragumi.co.jp/ir/irinfo/backnumber.html
+    source_dataset_id: okumura_results_reference
+    source_doc_type: factbook_or_results
+
+  - id: toa_results_documents
+    company_id: TOA
+    company_name: 東亜建設工業
+    source_page_url: https://www.toa-const.co.jp/ir/library/results/
+    source_dataset_id: toa_results_reference
+    source_doc_type: results_reference
+
+  - id: zenitaka_library_documents
+    company_id: ZENITAKA
+    company_name: 錢高組
+    source_page_url: https://www.zenitaka.co.jp/ir/library.html
+    source_dataset_id: zenitaka_ir_library
+    source_doc_type: ir_library
+    link_text_includes:
+      - 決算短信
+      - 事業報告書
+      - 有価証券報告書
+    href_includes:
+      - .pdf
+
+  - id: asanuma_library_documents
+    company_id: ASANUMA
+    company_name: 淺沼組
+    source_page_url: https://www.asanuma.co.jp/ir/documents01.html
+    source_dataset_id: asanuma_ir_library
+    source_doc_type: ir_library
+
+  - id: matsui_results_documents
+    company_id: MATSUI
+    company_name: 松井建設
+    source_page_url: https://www.matsui-ken.co.jp/investor/financial_report_explanation
+    source_dataset_id: matsui_results_reference
+    source_doc_type: results_reference
+
+  - id: kitano_ir_documents
+    company_id: KITANO
+    company_name: 北野建設
+    source_page_url: https://www.kitano.co.jp/ir/
+    source_dataset_id: kitano_ir_library
+    source_doc_type: ir_library
+    follow_link_text_includes:
+      - 決算短信
+      - 有価証券報告書
+      - 四半期報告書
+      - 適時開示
+    follow_href_includes:
+      - /ir/library/earnings-release/
+      - /ir/library/securities-report/
+      - /ir/library/timely-disclosure/
+    link_text_includes:
+      - 決算短信
+      - 有価証券報告書
+      - 半期報告書
+      - 四半期報告書
+      - 適時開示
+    href_includes:
+      - .pdf
+
+sources:
+  - id: shimizu_segment_orders_irpocket
+    company_id: SHIMIZU
+    company_name: 清水建設
+    enabled: true
+    parser: irpocket_json_chart
+    source_doc_type: data_book
+    source_dataset_id: shimizu_segment_orders
+    source_metric_id: building_orders_by_business_scope
+    category_type: business_scope
+    source_table_title: 単体 受注高
+    source_page_url: https://www.shimz.co.jp/company/ir/library/segment/
+    data_url: https://xml.irpocket.com/1803/JSON/graph-tan_segjutyu.json
+    style_url: https://xml.irpocket.com/1803/JSON/graph-tan_segjutyu-style.json
+    scope: standalone
+    business_scope: construction_orders
+    unit: 億円
+    note: "用途別ではなく、公式データブック上の建築/土木等の受注区分。用途別抽出器のJSONパイロットとして取り込む。"
+
+  - id: kajima_quarterly_order_documents
+    company_id: KAJIMA
+    company_name: 鹿島建設
+    enabled: true
+    parser: link_index
+    source_doc_type: q_order
+    source_dataset_id: kajima_q_order
+    source_metric_id: building_orders_by_use
+    category_type: use
+    source_page_url: https://www.kajima.co.jp/ir/q_order/index-j.html
+    scope: standalone
+    business_scope: building_orders
+    link_text_includes:
+      - 第4四半期
+      - 第3四半期
+      - 第2四半期
+      - 第1四半期
+    href_includes:
+      - /ir/q_order/pdf/
+    note: "四半期受注実績PDFを発見・保存する。PDF表抽出は pypdf/pdfplumber 等の導入後に値まで自動化する。"
+
+  - id: kajima_factbook_documents
+    company_id: KAJIMA
+    company_name: 鹿島建設
+    enabled: true
+    parser: link_index
+    source_doc_type: factbook
+    source_dataset_id: kajima_factbook
+    source_metric_id: building_orders_by_use
+    category_type: use
+    source_page_url: https://www.kajima.co.jp/ir/fact/index-j.html
+    scope: standalone
+    business_scope: building_orders
+    href_includes:
+      - /ir/fact/pdf/
+      - /ir/fact/xls/
+    note: "ファクトブックPDF/Excelを発見・保存する。旧xlsは xlrd/LibreOffice 導入後に値まで自動化する。"
+
+  - id: obayashi_results_reference_documents
+    company_id: OBAYASHI
+    company_name: 大林組
+    enabled: true
+    parser: link_index
+    source_doc_type: results_reference
+    source_dataset_id: obayashi_results_reference
+    source_metric_id: building_orders_by_use
+    category_type: use
+    source_page_url: https://ir.obayashi.co.jp/ja/ir/data/results.html
+    scope: standalone
+    business_scope: building_orders
+    link_text_includes:
+      - 決算参考資料
+    href_includes:
+      - .pdf
+    note: "決算参考資料PDFを発見・保存する。PDF表抽出は pypdf/pdfplumber 等の導入後に値まで自動化する。"

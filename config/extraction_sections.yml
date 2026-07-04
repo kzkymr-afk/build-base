@@ -65,6 +65,17 @@ review_average_age:
   - 平均年齢
   target_fields:
   - average_age
+  review_table_keywords:
+  - 提出会社の状況
+  review_row_labels:
+  - 平均年齢（歳）
+  - 平均年齢
+  review_row_labels_by_field:
+    average_age:
+    - 平均年齢（歳）
+    - 平均年齢
+  review_units_by_field:
+    average_age: 歳
 review_average_salary:
   description: 'レビュー由来ヒント: 平均給与'
   heading_keywords:
@@ -78,20 +89,46 @@ review_average_salary:
   - average_salary
 review_rd_expense:
   description: 'レビュー由来ヒント: 研究開発費'
-  heading_keywords: []
+  heading_keywords:
+  - 研究開発活動
+  - ５ 【研究開発活動】
+  - ５【研究開発活動】
+  - ６【研究開発活動】
+  - ６ 【研究開発活動】
+  - ６ 【研究開発活動】
   table_keywords:
   - 研究開発費
   target_fields:
   - rd_expense
+  review_table_keywords:
+  - 研究開発費
+  review_row_labels:
+  - 研究開発費
+  review_row_labels_by_field:
+    rd_expense:
+    - 研究開発費
+  review_units_by_field:
+    rd_expense: 百万円
 review_average_tenure:
   description: 'レビュー由来ヒント: 平均勤続年数'
   heading_keywords:
   - 従業員の状況
+  - ５【従業員の状況】
+  - ５ 【従業員の状況】
   table_keywords:
   - 提出会社の状況
   - 平均勤続年数
   target_fields:
   - average_tenure
+  review_table_keywords:
+  - 提出会社の状況
+  review_row_labels:
+  - 平均勤続年数
+  review_row_labels_by_field:
+    average_tenure:
+    - 平均勤続年数
+  review_units_by_field:
+    average_tenure: 年
 review_cost_expense:
   description: 'レビュー由来ヒント: 経費'
   heading_keywords:
@@ -100,6 +137,14 @@ review_cost_expense:
   - 経費
   target_fields:
   - cost_expense
+  review_table_keywords: []
+  review_row_labels:
+  - 経費
+  review_row_labels_by_field:
+    cost_expense:
+    - 経費
+  review_units_by_field:
+    cost_expense: 百万円
 review_cost_subcontract:
   description: 'レビュー由来ヒント: 外注費'
   heading_keywords: []
@@ -121,6 +166,14 @@ review_cost_labor:
   - 労務費
   target_fields:
   - cost_labor
+  review_table_keywords: []
+  review_row_labels:
+  - 労務費
+  review_row_labels_by_field:
+    cost_labor:
+    - 労務費
+  review_units_by_field:
+    cost_labor: 百万円
 review_cost_materials:
   description: 'レビュー由来ヒント: 材料費'
   heading_keywords: []
@@ -157,3 +210,485 @@ review_advertising_expense:
     advertising_expense: 百万円
   target_fields:
   - advertising_expense
+review_segment_orders_civil:
+  description: 'レビュー由来ヒント: セグメント受注高_土木'
+  heading_keywords:
+  - 受注実績
+  - 土木事業
+  table_keywords:
+  - セグメント受注高_土木
+  - 土木部門
+  review_table_keywords: []
+  review_row_labels:
+  - セグメント受注高_土木
+  - 土木部門
+  review_row_labels_by_field:
+    segment_orders_civil:
+    - セグメント受注高_土木
+    - 土木部門
+  review_units_by_field:
+    segment_orders_civil: 百万円
+  target_fields:
+  - segment_orders_civil
+review_construction_gross_profit_standalone:
+  description: 'レビュー由来ヒント: 完成工事総利益_単独'
+  heading_keywords: []
+  table_keywords:
+  - 完成工事総利益_単独
+  review_table_keywords: []
+  review_row_labels:
+  - 完成工事総利益_単独
+  review_row_labels_by_field:
+    construction_gross_profit_standalone:
+    - 完成工事総利益_単独
+  review_units_by_field:
+    construction_gross_profit_standalone: 百万円
+  target_fields:
+  - construction_gross_profit_standalone
+review_construction_revenue_standalone:
+  description: 'レビュー由来ヒント: 完成工事高_単独'
+  heading_keywords: []
+  table_keywords:
+  - 完成工事高_単独
+  review_table_keywords: []
+  review_row_labels:
+  - 完成工事高_単独
+  review_row_labels_by_field:
+    construction_revenue_standalone:
+    - 完成工事高_単独
+  review_units_by_field:
+    construction_revenue_standalone: 百万円
+  target_fields:
+  - construction_revenue_standalone
+review_donation_expense:
+  description: 'レビュー由来ヒント: 寄付金'
+  heading_keywords: []
+  table_keywords:
+  - 寄付金
+  review_table_keywords: []
+  review_row_labels:
+  - 寄付金
+  review_row_labels_by_field:
+    donation_expense:
+    - 寄付金
+  review_units_by_field:
+    donation_expense: 百万円
+  target_fields:
+  - donation_expense
+review_entertainment_expense:
+  description: 'レビュー由来ヒント: 交際費'
+  heading_keywords: []
+  table_keywords:
+  - 交際費
+  review_table_keywords: []
+  review_row_labels:
+  - 交際費
+  review_row_labels_by_field:
+    entertainment_expense:
+    - 交際費
+  review_units_by_field:
+    entertainment_expense: 百万円
+  target_fields:
+  - entertainment_expense
+review_net_sales_standalone:
+  description: 'レビュー由来ヒント: 売上高_単独'
+  heading_keywords: []
+  table_keywords:
+  - 売上高_単独
+  review_table_keywords: []
+  review_row_labels:
+  - 売上高_単独
+  review_row_labels_by_field:
+    net_sales_standalone:
+    - 売上高_単独
+  review_units_by_field:
+    net_sales_standalone: 百万円
+  target_fields:
+  - net_sales_standalone
+review_sga_expense:
+  description: 'レビュー由来ヒント: 販売費及び一般管理費'
+  heading_keywords: []
+  table_keywords:
+  - 販売費及び一般管理費
+  review_table_keywords: []
+  review_row_labels:
+  - 販売費及び一般管理費
+  review_row_labels_by_field:
+    sga_expense:
+    - 販売費及び一般管理費
+  review_units_by_field:
+    sga_expense: 百万円
+  target_fields:
+  - sga_expense
+review_building_orders_total:
+  description: 'レビュー由来ヒント: 建築受注高_合計'
+  heading_keywords:
+  - 受注高
+  - 建築
+  - 完成工事高
+  - 繰越高
+  - 工事受注高
+  - ・緊密な業務連携と効率的な組織運営を目的に
+  - 土木・建築部門の本社機能等を再配置
+  - 連結売上高は
+  - 主に当社における完成工事高が増加したことにより
+  - 前連結会計年度比17.2％増の4
+  - 926億円となった。
+  - 建築事業
+  - (建築)
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - ２．国内建築事業戦略
+  - ・建設事業の競争力・収益力の強化…………国内土木
+  - 国内建築
+  - 海外の事業３本柱の競争力・収益力の強化
+  - 売上高　　　　　　 　　　　　　　5
+  - '6'
+  - 000億円 程度
+  table_keywords:
+  - 建築受注高_合計
+  - 建築工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 完成工事高
+  - 受注工事高
+  - 建築事業
+  review_table_keywords:
+  - 建築受注高_合計
+  - 完成工事高
+  - 受注工事高
+  review_row_labels:
+  - 建築受注高_合計
+  - 建築工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  - 建築事業
+  review_row_labels_by_field:
+    building_orders_total:
+    - 建築受注高_合計
+    - 建築工事
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+    - 建築事業
+  review_units_by_field:
+    building_orders_total: 百万円
+  target_fields:
+  - building_orders_total
+review_backlog_building_next:
+  description: 'レビュー由来ヒント: 次期繰越高_建築'
+  heading_keywords:
+  - 繰越高
+  - 建築
+  - 完成工事高
+  - 受注高
+  - 工事受注高
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - 建設事業における受注工事高及び完成工事高の実績
+  - ２．国内建築事業戦略
+  - ・建設事業の競争力・収益力の強化…………国内土木
+  - 国内建築
+  - 海外の事業３本柱の競争力・収益力の強化
+  - 売上高　　　　　　 　　　　　　　5
+  table_keywords:
+  - 完成工事高
+  - 受注工事高
+  - 次期繰越高_建築
+  - 次期繰越工事高
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  review_table_keywords:
+  - 完成工事高
+  - 受注工事高
+  review_row_labels:
+  - 次期繰越高_建築
+  - 次期繰越工事高
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  review_row_labels_by_field:
+    backlog_building_next:
+    - 次期繰越高_建築
+    - 次期繰越工事高
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+  review_units_by_field:
+    backlog_building_next: 百万円
+  target_fields:
+  - backlog_building_next
+review_completed_building:
+  description: 'レビュー由来ヒント: 完成工事高_建築'
+  heading_keywords:
+  - 完成工事高
+  - 建築
+  - 受注高
+  - 繰越高
+  - 工事受注高
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - 建設事業における受注工事高及び完成工事高の実績
+  - ２．国内建築事業戦略
+  - 売上高　　　　　　 　　　　　　　5
+  table_keywords:
+  - 完成工事高
+  - 受注工事高
+  - 完成工事高_建築
+  - 売上高
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  review_table_keywords:
+  - 完成工事高
+  - 受注工事高
+  - 完成工事高_建築
+  review_row_labels:
+  - 完成工事高_建築
+  - 売上高
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  review_row_labels_by_field:
+    completed_building:
+    - 完成工事高_建築
+    - 売上高
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+  review_units_by_field:
+    completed_building: 百万円
+  target_fields:
+  - completed_building
+review_construction_gross_profit_consolidated:
+  description: 'レビュー由来ヒント: 完成工事総利益_連結'
+  heading_keywords: []
+  table_keywords:
+  - 完成工事総利益_連結
+  review_table_keywords: []
+  review_row_labels:
+  - 完成工事総利益_連結
+  review_row_labels_by_field:
+    construction_gross_profit_consolidated:
+    - 完成工事総利益_連結
+  review_units_by_field:
+    construction_gross_profit_consolidated: 百万円
+  target_fields:
+  - construction_gross_profit_consolidated
+review_construction_revenue_consolidated:
+  description: 'レビュー由来ヒント: 完成工事高_連結'
+  heading_keywords: []
+  table_keywords:
+  - 完成工事高_連結
+  review_table_keywords: []
+  review_row_labels:
+  - 完成工事高_連結
+  review_row_labels_by_field:
+    construction_revenue_consolidated:
+    - 完成工事高_連結
+  review_units_by_field:
+    construction_revenue_consolidated: 百万円
+  target_fields:
+  - construction_revenue_consolidated
+review_segment_profit_construction:
+  description: 'レビュー由来ヒント: 建設セグメント利益'
+  heading_keywords: []
+  table_keywords:
+  - 建設セグメント利益
+  review_table_keywords: []
+  review_row_labels:
+  - 建設セグメント利益
+  review_row_labels_by_field:
+    segment_profit_construction:
+    - 建設セグメント利益
+  review_units_by_field:
+    segment_profit_construction: 百万円
+  target_fields:
+  - segment_profit_construction
+review_building_orders_government:
+  description: 'レビュー由来ヒント: 建築受注高_官庁'
+  heading_keywords:
+  - 受注高
+  - 建築
+  - 官庁
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - 完成工事高
+  - 繰越高
+  - 工事受注高
+  - 建設事業における受注工事高及び完成工事高の実績
+  - 建設事業における受注工事高及び完成工事高の状況
+  - ・建設事業の競争力・収益力の強化…………国内土木
+  - 国内建築
+  - 海外の事業３本柱の競争力・収益力の強化
+  - 売上高　　　　　　 　　　　　　　5
+  table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_官庁
+  - 官公庁
+  - 公共
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  review_table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_官庁
+  review_row_labels:
+  - 建築受注高_官庁
+  - 官公庁
+  - 公共
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  review_row_labels_by_field:
+    building_orders_government:
+    - 建築受注高_官庁
+    - 官公庁
+    - 公共
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+  review_units_by_field:
+    building_orders_government: 百万円
+  target_fields:
+  - building_orders_government
+review_building_orders_overseas:
+  description: 'レビュー由来ヒント: 建築受注高_海外'
+  heading_keywords:
+  - 受注高
+  - 建築
+  - 海外
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - 完成工事高
+  - 繰越高
+  - 工事受注高
+  - 建設事業における受注工事高及び完成工事高の実績
+  - 建設事業における受注工事高及び完成工事高の状況
+  - ・建設事業の競争力・収益力の強化…………国内土木
+  - 国内建築
+  - 海外の事業３本柱の競争力・収益力の強化
+  table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_海外
+  - 海外工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  review_table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_海外
+  review_row_labels:
+  - 建築受注高_海外
+  - 海外工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  review_row_labels_by_field:
+    building_orders_overseas:
+    - 建築受注高_海外
+    - 海外工事
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+  review_units_by_field:
+    building_orders_overseas: 百万円
+  target_fields:
+  - building_orders_overseas
+review_building_orders_private:
+  description: 'レビュー由来ヒント: 建築受注高_民間'
+  heading_keywords:
+  - 受注高
+  - 建築
+  - 民間
+  - 海外受注高　（現地法人含む）　 　1
+  - 000億円
+  - 完成工事高
+  - 繰越高
+  - 工事受注高
+  - 建設事業における受注工事高及び完成工事高の実績
+  - 建設事業における受注工事高及び完成工事高の状況
+  table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_民間
+  - 民間工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  review_table_keywords:
+  - 受注工事高
+  - 完成工事高
+  - 建築受注高_民間
+  review_row_labels:
+  - 建築受注高_民間
+  - 民間工事
+  - 建築
+  - 土木
+  - 官庁
+  - 民間
+  - 海外
+  - 受注工事高
+  review_row_labels_by_field:
+    building_orders_private:
+    - 建築受注高_民間
+    - 民間工事
+    - 建築
+    - 土木
+    - 官庁
+    - 民間
+    - 海外
+    - 受注工事高
+  review_units_by_field:
+    building_orders_private: 百万円
+  target_fields:
+  - building_orders_private

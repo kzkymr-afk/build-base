@@ -22,6 +22,12 @@ def run_all(root: Path, log: Optional[LogCallback] = None, fiscal_years: Optiona
     return _call("run-all", cli.cmd_run_all, root, args, log)
 
 
+def import_manual_technicians(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Import the curated Obsidian engineer-count note into the local mart."""
+    _prepare(root)
+    return _call("import-manual-technicians", cli.cmd_import_manual_technicians, root, argparse.Namespace(note_path=""), log)
+
+
 def reextract_with_review(root: Path, log: Optional[LogCallback] = None) -> int:
     """Re-extract using current rules, then apply saved human review decisions."""
     _prepare(root)
@@ -194,6 +200,68 @@ def annual_refresh(
     return code
 
 
+def refresh_stock_prices(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Fetch monthly stock prices and merge them into the market mart."""
+    _prepare(root)
+    from yuho_auto_extract.services import market
+
+    summary = market.refresh_stock_prices_if_due(root, force=force, dry_run=dry_run, log=log)
+    status = str(summary.get("status") or "")
+    return 0 if status in {"succeeded", "partial_success", "dry_run", "skipped"} else 1
+
+
+def refresh_company_factbooks(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Fetch configured company factbook/data book sources and merge the pilot mart."""
+    _prepare(root)
+    from yuho_auto_extract.services import company_factbooks
+
+    summary = company_factbooks.refresh_company_factbooks(root, force=force, dry_run=dry_run, log=log)
+    status = str(summary.get("status") or "")
+    return 0 if status in {"succeeded", "partial_success", "dry_run"} else 1
+
+
+def build_xbrl_fact_store(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Build normalized XBRL Fact Store files for reviewable extraction."""
+    _prepare(root)
+    args = argparse.Namespace(doc_id="", company_year_id="")
+    return _call("xbrl-fact-store", cli.cmd_build_xbrl_fact_store, root, args, log)
+
+
+def build_major_financial_evidence(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Refresh XBRL Fact Store, then build AI-reviewable evidence packs for major financial fields."""
+    _prepare(root)
+    code = _call("xbrl-fact-store", cli.cmd_build_xbrl_fact_store, root, argparse.Namespace(doc_id="", company_year_id=""), log)
+    if code:
+        return code
+    return _call("build-major-financial-evidence", cli.cmd_build_major_financial_evidence, root, argparse.Namespace(chunk_size=80), log)
+
+
+def build_xbrl_discovered_metrics(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Refresh XBRL Fact Store, then catalog every numeric current-year XBRL metric."""
+    _prepare(root)
+    return _call("prepare-xbrl-discovered-metrics", cli.cmd_prepare_xbrl_discovered_metrics, root, argparse.Namespace(include_prior_periods=False), log)
+
+
+def compare_major_financial_ai_decisions(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Compare manually pasted AI candidate decisions without changing final outputs."""
+    _prepare(root)
+    args = argparse.Namespace(
+        decisions="data/ai_evidence/major_financial/ai_decisions.jsonl",
+        output="data/reports/major_financial_ai_decision_compare.csv",
+    )
+    return _call("compare-major-financial-ai-decisions", cli.cmd_compare_major_financial_ai_decisions, root, args, log)
+
+
 def _sync_review_learning_rules(root: Path, log: Optional[LogCallback] = None) -> Dict[str, object]:
     generated = rule_candidates.generate_rule_candidates(root)
     status_counts = generated.get("status_counts", {})
@@ -259,6 +327,86 @@ def build_ai_bundle_only(root: Path, log: Optional[LogCallback] = None) -> int:
 def build_algorithm_audit(root: Path, log: Optional[LogCallback] = None) -> int:
     _prepare(root)
     return _call("build-algorithm-audit", cli.cmd_build_algorithm_audit, root, argparse.Namespace(), log)
+
+
+def build_corroboration_report(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Build the read-only corroboration report for existing extracted cells."""
+    _prepare(root)
+    return _call("build-corroboration-report", cli.cmd_build_corroboration_report, root, argparse.Namespace(), log)
+
+
+def build_algorithm_audit_findings(root: Path, log: Optional[LogCallback] = None) -> int:
+    """P7: build the read-only deterministic algorithm audit findings."""
+    _prepare(root)
+    return _call("audit-findings", cli.cmd_audit_findings, root, argparse.Namespace(), log)
+
+
+def corroborate(root: Path, log: Optional[LogCallback] = None) -> int:
+    """Run P2 evidence-based corroboration: writes semantics.db and annotates
+    normalized_validated_long with corroboration_count/conflict_count/corroboration_status."""
+    _prepare(root)
+    return _call("corroborate", cli.cmd_corroborate, root, argparse.Namespace(), log)
+
+
+def golden_freeze(root: Path, log: Optional[LogCallback] = None) -> int:
+    """P3: review_resolved.csv + cell_resolutions(auto_confirmed) + MANUAL_OBSIDIAN
+    の3源からgolden集合を凍結し、semantics.db の golden_values/golden_negative を
+    完全置換する。明示実行専用（他のジョブから自動起動しない）。"""
+    _prepare(root)
+    return _call("golden-freeze", cli.cmd_golden_freeze, root, argparse.Namespace(), log)
+
+
+def ai_map_observed_items(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    tier: str = "bulk",
+    limit: int = 50,
+    dry_run: bool = True,
+) -> int:
+    """P5: 未マップobserved_itemsをAIにマッピング提案させ、proposedとして書き込む。
+    dry_run=Trueの場合はカード生成のみでAI呼び出しを行わない（コスト0）。
+    dry_run=Falseの場合も、実行にはClaudeCliRunnerが必要——Web API経由では
+    当面 dry_run 固定を強く推奨（人間が明示的にCLIから叩く運用にする）。"""
+    _prepare(root)
+    return _call(
+        "ai-map-observed-items",
+        cli.cmd_ai_map_observed_items,
+        root,
+        argparse.Namespace(tier=tier, limit=limit, dry_run=dry_run),
+        log,
+    )
+
+
+def promote_ai_mappings(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    confirm_verified_maps: Optional[bool] = None,
+    adopt_new_concepts: Optional[bool] = None,
+    dry_run: bool = True,
+) -> int:
+    """P5c: AI提案(map/new_concept)の数値裏取り確定・新概念採用を実行する。
+    confirm_verified_maps/adopt_new_concepts が両方Noneの場合は両方実行する。
+    dry_run=Trueの場合はDB書き込みを行わず判定結果のみ表示する（既定）。"""
+    _prepare(root)
+    return _call(
+        "promote-ai-mappings",
+        cli.cmd_promote_ai_mappings,
+        root,
+        argparse.Namespace(
+            confirm_verified_maps=confirm_verified_maps,
+            adopt_new_concepts=adopt_new_concepts,
+            dry_run=dry_run,
+        ),
+        log,
+    )
+
+
+def regression_check(root: Path, log: Optional[LogCallback] = None, mode: str = "light") -> int:
+    """P3: 一時shadow_root上で再抽出し、凍結済みgoldenとdiffする。
+    data/reports/regression_diff.csv・regression_summary.json を書く。
+    既存 data/final・data/intermediate は一切変更しない。"""
+    _prepare(root)
+    return _call("regression-check", cli.cmd_regression_check, root, argparse.Namespace(mode=mode), log)
 
 
 def _read_existing(path: Path) -> list[dict]:

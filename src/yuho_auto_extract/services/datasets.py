@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
@@ -31,7 +32,47 @@ DEFAULT_RESULT_FIELDS = [
     "employees_consolidated",
 ]
 
+FIELD_CATEGORY_LABELS = {
+    "performance": "財務・収益",
+    "financial_position": "財政状態",
+    "orders": "受注・完成・繰越",
+    "segment_orders": "セグメント受注",
+    "construction": "完成工事",
+    "segment": "セグメント",
+    "cost": "工事原価",
+    "expense": "費用",
+    "human_capital": "人員・技術者",
+    "people": "人員・技術者",
+    "derived_ratio": "比率・派生",
+}
+
+FIELD_CATEGORY_PRESET_ORDER = [
+    "performance",
+    "financial_position",
+    "orders",
+    "segment_orders",
+    "construction",
+    "segment",
+    "cost",
+    "expense",
+    "human_capital",
+    "people",
+    "derived_ratio",
+]
+
+REVIEW_CATEGORY_ORDER = [
+    "missing",
+    "new_candidate",
+    "validation_issue",
+    "scope_warning",
+    "warning_candidate",
+    "saved_unapplied",
+    "recurrent",
+    "resolved_done",
+]
+
 COST_COMPONENT_FIELDS = ["cost_materials", "cost_labor", "cost_subcontract", "cost_expense"]
+SOURCE_SUMMARY_LIMIT = 250
 
 DERIVED_RATIO_FIELDS = [
     {
@@ -139,6 +180,22 @@ def project_status(root: Path) -> Dict[str, Any]:
             "review_queue": (root / "data" / "review" / "review_queue.csv").exists(),
             "review_resolved": (root / "data" / "review" / "review_resolved.csv").exists(),
             "review_learning_impact": (root / "data" / "review" / "review_learning_impact.csv").exists(),
+            "stock_price_monthly": (root / "data" / "marts" / "market" / "stock_price_monthly.csv").exists(),
+            "company_factbook_orders": (root / "data" / "marts" / "company_factbooks" / "building_orders_by_category.csv").exists(),
+            "company_factbook_documents": (root / "data" / "marts" / "company_factbooks" / "source_documents.csv").exists(),
+            "xbrl_fact_store_manifest": (root / "data" / "marts" / "xbrl_fact_store" / "manifest.json").exists(),
+            "xbrl_fact_store_facts_json": (root / "data" / "marts" / "xbrl_fact_store" / "facts.json").exists(),
+            "xbrl_fact_store_context_json": (root / "data" / "marts" / "xbrl_fact_store" / "context_index.json").exists(),
+            "xbrl_fact_store_digest": (root / "data" / "marts" / "xbrl_fact_store" / "document_digest.md").exists(),
+            "xbrl_discovered_metrics_manifest": (root / "data" / "marts" / "xbrl_discovered_metrics" / "manifest.json").exists(),
+            "xbrl_discovered_metric_catalog": (root / "data" / "marts" / "xbrl_discovered_metrics" / "metric_catalog.csv").exists(),
+            "xbrl_discovered_value_long": (root / "data" / "marts" / "xbrl_discovered_metrics" / "value_long.csv").exists(),
+            "xbrl_discovered_similarity_suggestions": (root / "data" / "marts" / "xbrl_discovered_metrics" / "similarity_suggestions.csv").exists(),
+            "major_financial_evidence_manifest": (root / "data" / "ai_evidence" / "major_financial" / "manifest.json").exists(),
+            "major_financial_candidate_facts": (root / "data" / "ai_evidence" / "major_financial" / "candidate_facts.jsonl").exists(),
+            "major_financial_candidate_groups": (root / "data" / "ai_evidence" / "major_financial" / "candidate_groups.jsonl").exists(),
+            "major_financial_ai_decisions": (root / "data" / "ai_evidence" / "major_financial" / "ai_decisions.jsonl").exists(),
+            "major_financial_ai_compare": (root / "data" / "reports" / "major_financial_ai_decision_compare.csv").exists(),
             "ai_bundle": (root / "data" / "ai_bundle").exists(),
             "algorithm_audit": (root / "data" / "algorithm_audit" / "manifest.json").exists(),
         },
@@ -184,7 +241,16 @@ def read_chart_data(
     field_definitions = _field_definitions(root)
     selected_fields = [field for field in (fields or []) if field in field_definitions]
     if not selected_fields:
-        selected_fields = [field for field in DEFAULT_RESULT_FIELDS if field in field_definitions][:4]
+        return {
+            "rows": [],
+            "columns": [],
+            "total": 0,
+            "omitted_rows": 0,
+            "fields": [],
+            "companies": [],
+            "years": [],
+            "sources": [],
+        }
 
     rows = _attach_company_names(root, read_table(root / "data" / "final" / "final_master_wide.csv"))
     filtered = []
@@ -222,6 +288,7 @@ def read_chart_data(
         "fields": [_chart_field(field_definitions[field_id]) for field_id in selected_fields],
         "companies": _chart_companies(filtered),
         "years": sorted({str(row.get("fiscal_year", "")) for row in filtered if row.get("fiscal_year")}),
+        "sources": _chart_source_summaries(root, filtered, selected_fields, field_definitions),
     }
 
 
@@ -271,51 +338,7 @@ def read_options(root: Path) -> Dict[str, Any]:
             if row.get("field_id")
         ],
         "default_result_fields": DEFAULT_RESULT_FIELDS,
-        "field_presets": [
-            {"id": "core", "name": "主要指標", "fields": DEFAULT_RESULT_FIELDS},
-            {
-                "id": "orders",
-                "name": "受注・完成・繰越",
-                "fields": [
-                    "building_orders_total",
-                    "building_orders_private",
-                    "building_orders_government",
-                    "completed_building",
-                    "backlog_building_next",
-                    "building_orders_special_contract_ratio",
-                    "building_orders_competitive_ratio",
-                ],
-            },
-            {
-                "id": "finance",
-                "name": "財務・収益",
-                "fields": [
-                    "net_sales_consolidated",
-                    "operating_income_consolidated",
-                    "ordinary_income_consolidated",
-                    "profit_attributable_owners_parent",
-                    "roe",
-                    "total_assets_consolidated",
-                    "equity_ratio_consolidated",
-                ],
-            },
-            {
-                "id": "people",
-                "name": "人員・給与",
-                "fields": [
-                    "employees_consolidated",
-                    "employees_standalone",
-                    "average_salary",
-                    "average_age",
-                    "average_tenure",
-                ],
-            },
-            {
-                "id": "derived_ratios",
-                "name": "比率・派生",
-                "fields": DERIVED_RATIO_FIELD_IDS,
-            },
-        ],
+        "field_presets": _result_field_presets(fields),
     }
 
 
@@ -328,6 +351,7 @@ def read_review_queue(
     field_id: str = "",
     search: str = "",
     review_status: str = "",
+    review_category: str = "",
 ) -> Dict[str, Any]:
     rows = read_table(root / "data" / "review" / "review_queue.csv")
     resolved_path = root / "data" / "review" / "review_resolved.csv"
@@ -337,7 +361,7 @@ def read_review_queue(
         if row.get("company_year_id") and row.get("field_id")
     }
     company_names = _company_names(root)
-    filtered = []
+    filtered_before_category = []
     for row in rows:
         row = dict(row)
         resolved = resolved_by_key.get((str(row.get("company_year_id", "")), str(row.get("field_id", ""))))
@@ -369,6 +393,8 @@ def read_review_queue(
             continue
         if review_status == "active" and _is_resolved_review_done(row):
             continue
+        row["review_category"] = _review_category(row)
+        row["review_category_label"] = _review_category_label(row["review_category"])
         if company and row_company_id != company:
             continue
         if fiscal_year and str(row.get("fiscal_year", "")) != str(fiscal_year):
@@ -377,8 +403,20 @@ def read_review_queue(
             continue
         if search and not _contains(row, search):
             continue
-        filtered.append(row)
-    return paginate(filtered, page, page_size)
+        filtered_before_category.append(row)
+    filtered = [
+        row
+        for row in filtered_before_category
+        if not review_category or str(row.get("review_category", "")) == review_category
+    ]
+    result = paginate(filtered, page, page_size)
+    result["review_category_counts"] = dict(Counter(str(row.get("review_category", "")) for row in filtered_before_category))
+    result["review_category_labels"] = {
+        key: _review_category_label(key)
+        for key in REVIEW_CATEGORY_ORDER
+    }
+    result["review_category_filter"] = review_category
+    return result
 
 
 def read_resolved_reviews(root: Path) -> Dict[str, Any]:
@@ -510,6 +548,38 @@ def _columns(rows: Sequence[Dict[str, Any]]) -> List[str]:
             if key not in columns:
                 columns.append(key)
     return columns
+
+
+def _result_field_presets(fields: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    field_ids = [str(row.get("field_id", "")).strip() for row in fields if str(row.get("field_id", "")).strip()]
+    grouped: Dict[str, List[str]] = {}
+    for row in fields:
+        field_id = str(row.get("field_id", "")).strip()
+        if not field_id:
+            continue
+        category = str(row.get("category", "") or "uncategorized").strip() or "uncategorized"
+        grouped.setdefault(category, []).append(field_id)
+
+    presets = [
+        {"id": "all", "name": "全指標", "fields": field_ids},
+        {"id": "core", "name": "主要指標", "fields": [field_id for field_id in DEFAULT_RESULT_FIELDS if field_id in field_ids]},
+    ]
+    ordered_categories = [
+        category
+        for category in FIELD_CATEGORY_PRESET_ORDER
+        if category in grouped
+    ]
+    ordered_categories.extend(sorted(category for category in grouped if category not in FIELD_CATEGORY_PRESET_ORDER))
+    for category in ordered_categories:
+        preset_id = "derived_ratios" if category == "derived_ratio" else category
+        presets.append(
+            {
+                "id": preset_id,
+                "name": FIELD_CATEGORY_LABELS.get(category, category if category != "uncategorized" else "未分類"),
+                "fields": grouped[category],
+            }
+        )
+    return presets
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -669,6 +739,13 @@ def _classify_cell(
             f"この会社年度は文書解決に失敗しています: {failure_reason}",
             "まず対象年度の有価証券報告書の docID / EDINET 取得条件を確認してから再実行してください。",
         )
+    if any(str(row.get("review_decision", "")).strip().lower() == "not_applicable" for row in resolved_rows):
+        return (
+            "not_applicable",
+            "対象外",
+            "review_resolved.csv で、この会社年度・項目は対象外として保存されています。",
+            "比較対象に戻す場合はレビュー画面で保存済みレビューを削除してください。",
+        )
     if any(_resolved_review_value(row) for row in resolved_rows):
         return (
             "review_saved_not_applied",
@@ -722,7 +799,45 @@ def _is_resolved_review_done(row: Dict[str, Any]) -> bool:
     if str(row.get("review_saved", "")) != "yes":
         return False
     status = str(row.get("applied_status", "") or "").strip().lower()
-    return status in {"applied", "rejected"}
+    if status in {"applied", "rejected", "not_applicable"}:
+        return True
+    return str(row.get("review_decision", "")).strip().lower() == "not_applicable"
+
+
+def _review_category(row: Dict[str, Any]) -> str:
+    if _is_resolved_review_done(row):
+        return "resolved_done"
+    if str(row.get("review_saved", "")) == "yes":
+        return "saved_unapplied"
+    if _is_blank(row.get("extracted_value", "")):
+        return "missing"
+    reasons = {
+        reason.strip()
+        for reason in str(row.get("review_reason", "") or "").replace(",", ";").split(";")
+        if reason.strip()
+    }
+    if "existing_human_reviewed" in reasons or "existing_value_mismatch" in reasons:
+        return "recurrent"
+    if reasons & {"validation_warn", "validation_fail"}:
+        return "validation_issue"
+    if "data_scope_mismatch" in reasons:
+        return "scope_warning"
+    if reasons & {"confidence_below_threshold", "unit_unknown"}:
+        return "warning_candidate"
+    return "new_candidate"
+
+
+def _review_category_label(category: str) -> str:
+    return {
+        "missing": "未取得",
+        "new_candidate": "新規候補",
+        "validation_issue": "検算要確認",
+        "scope_warning": "スコープ警告",
+        "warning_candidate": "警告付き候補",
+        "saved_unapplied": "保存済み未反映",
+        "recurrent": "再発",
+        "resolved_done": "対応済み",
+    }.get(category, category or "未分類")
 
 
 def _first_nonblank(rows: Sequence[Dict[str, Any]], key: str) -> str:
@@ -776,6 +891,69 @@ def _chart_field(row: Dict[str, Any]) -> Dict[str, str]:
         "unit": unit,
         "label": f"{name} ({field_id})",
     }
+
+
+def _chart_source_summaries(
+    root: Path,
+    rows: Sequence[Dict[str, Any]],
+    selected_fields: Sequence[str],
+    field_definitions: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    audit_path = root / "data" / "final" / "source_audit.csv"
+    direct_fields = [field_id for field_id in selected_fields if field_id not in DERIVED_RATIO_FIELDS_BY_ID]
+    if not rows or not direct_fields or not audit_path.exists():
+        return []
+
+    row_by_company_year = {
+        str(row.get("company_year_id", "")): row
+        for row in rows
+        if row.get("company_year_id")
+    }
+    target_keys = {
+        (company_year_id, field_id)
+        for company_year_id in row_by_company_year
+        for field_id in direct_fields
+    }
+    summaries: List[Dict[str, str]] = []
+    seen = set()
+    for audit in read_table(audit_path):
+        company_year_id = str(audit.get("company_year_id", ""))
+        field_id = str(audit.get("field_id", ""))
+        if (company_year_id, field_id) not in target_keys:
+            continue
+        signature = (
+            company_year_id,
+            field_id,
+            str(audit.get("source_file", "")),
+            str(audit.get("source_heading", "")),
+            str(audit.get("source_quote", "")),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        row = row_by_company_year.get(company_year_id, {})
+        field = field_definitions.get(field_id, {})
+        summaries.append(
+            {
+                "company_year_id": company_year_id,
+                "company_name": str(row.get("operating_company_name", "") or row.get("operating_company_id", "")),
+                "period": str(row.get("fiscal_year", "")),
+                "field_id": field_id,
+                "field_name": str(audit.get("field_name_ja", "") or field.get("field_name_ja", "") or field_id),
+                "value": str(audit.get("value", "")),
+                "unit": str(audit.get("unit_normalized", "") or field.get("target_unit", "")),
+                "data_scope": str(audit.get("data_scope", "")),
+                "source_doc_id": str(audit.get("source_doc_id", "")),
+                "source_file": str(audit.get("source_file", "")),
+                "source_heading": str(audit.get("source_heading", "")),
+                "source_quote": str(audit.get("source_quote", "")),
+                "extraction_method": str(audit.get("extraction_method", "")),
+                "confidence": str(audit.get("confidence", "")),
+            }
+        )
+        if len(summaries) >= SOURCE_SUMMARY_LIMIT:
+            break
+    return summaries
 
 
 def _chart_companies(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, str]]:

@@ -26,6 +26,129 @@ fi
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/yuho-pycache}"
 export PYTHONPATH="${PYTHONPATH:-src}"
 
+RUN_DIR="${YUHO_RUN_DIR:-.run}"
+WEB_PID_FILE="${YUHO_WEB_PID_FILE:-$RUN_DIR/web.pid}"
+WEB_LOG_FILE="${YUHO_WEB_LOG_FILE:-$RUN_DIR/web.log}"
+WEB_ERR_FILE="${YUHO_WEB_ERR_FILE:-$RUN_DIR/web.err.log}"
+WEB_SCREEN_NAME="${YUHO_WEB_SCREEN_NAME:-buildbase-web}"
+WEB_AWAKE_PID_FILE="${YUHO_WEB_AWAKE_PID_FILE:-$RUN_DIR/web-awake.pid}"
+WEB_AWAKE_LOG_FILE="${YUHO_WEB_AWAKE_LOG_FILE:-$RUN_DIR/web-awake.log}"
+WEB_AWAKE_SCREEN_NAME="${YUHO_WEB_AWAKE_SCREEN_NAME:-buildbase-awake}"
+TAILSCALE_SOCKET="${YUHO_TAILSCALE_SOCKET:-/tmp/tailscaled-yuho.sock}"
+
+tailscale_cli() {
+  if [ -e "$TAILSCALE_SOCKET" ]; then
+    tailscale --socket="$TAILSCALE_SOCKET" "$@"
+  else
+    tailscale "$@"
+  fi
+}
+
+ensure_tailscale_serve() {
+  PORT="$1"
+  if ! command -v tailscale >/dev/null 2>&1; then
+    return
+  fi
+  if [ ! -e "$TAILSCALE_SOCKET" ]; then
+    return
+  fi
+  tailscale_cli serve --bg --http "$PORT" "127.0.0.1:$PORT" >/dev/null 2>&1 || true
+}
+
+web_urls() {
+  PORT="$1"
+  echo "ローカル: http://127.0.0.1:$PORT/"
+  ifconfig 2>/dev/null | awk -v port="$PORT" '/^[a-z0-9]+:/{iface=$1; sub(":","",iface)} /inet / && $2 != "127.0.0.1" && $0 ~ /broadcast/ {print "LAN:      http://" $2 ":" port "/  (" iface ")"}'
+  if command -v tailscale >/dev/null 2>&1; then
+    TS_IP="$(tailscale_cli ip -4 2>/dev/null || true)"
+    if [ -n "$TS_IP" ]; then
+      echo "Tailscale IP:   http://$TS_IP:$PORT/"
+    fi
+    TS_SERVE_STATUS="$(tailscale_cli serve status 2>/dev/null || true)"
+    TS_SERVE_HOST="$(printf '%s\n' "$TS_SERVE_STATUS" | awk -v port="$PORT" '$1 ~ "^http://.*[.]ts[.]net:" port "$" {print $1; exit}')"
+    TS_SERVE_SHORT="$(printf '%s\n' "$TS_SERVE_STATUS" | awk -v port="$PORT" '$1 ~ "^http://[a-zA-Z0-9-]+:" port "$" {print $1; exit}')"
+    if [ -n "$TS_SERVE_HOST" ]; then
+      echo "Tailscale固定: $TS_SERVE_HOST/"
+    elif [ -n "$TS_SERVE_SHORT" ]; then
+      echo "Tailscale固定: $TS_SERVE_SHORT/"
+    else
+      echo "Tailscale固定: http://business-dashboard.tail85c1ee.ts.net:$PORT/"
+    fi
+  fi
+}
+
+web_awake_stop() {
+  if [ -f "$WEB_AWAKE_PID_FILE" ]; then
+    PID="$(cat "$WEB_AWAKE_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      kill "$PID" 2>/dev/null || true
+    fi
+    rm -f "$WEB_AWAKE_PID_FILE"
+  fi
+  if command -v screen >/dev/null 2>&1; then
+    screen -S "$WEB_AWAKE_SCREEN_NAME" -X quit >/dev/null 2>&1 || true
+  fi
+}
+
+web_awake_start() {
+  if ! command -v caffeinate >/dev/null 2>&1; then
+    return
+  fi
+  web_awake_stop
+  if command -v screen >/dev/null 2>&1; then
+    screen -dmS "$WEB_AWAKE_SCREEN_NAME" caffeinate -ims
+  else
+    nohup caffeinate -ims > "$WEB_AWAKE_LOG_FILE" 2>&1 &
+    echo "$!" > "$WEB_AWAKE_PID_FILE"
+  fi
+}
+
+web_awake_running() {
+  if command -v screen >/dev/null 2>&1 && screen -ls | grep -q "[.]$WEB_AWAKE_SCREEN_NAME"; then
+    return 0
+  fi
+  if [ -f "$WEB_AWAKE_PID_FILE" ]; then
+    PID="$(cat "$WEB_AWAKE_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+web_stop_port() {
+  PORT="$1"
+  if [ -f "$WEB_PID_FILE" ]; then
+    PID="$(cat "$WEB_PID_FILE" 2>/dev/null || true)"
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+      kill "$PID" 2>/dev/null || true
+    fi
+    rm -f "$WEB_PID_FILE"
+  fi
+  PIDS="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$PIDS" ]; then
+    # shellcheck disable=SC2086
+    kill $PIDS 2>/dev/null || true
+  fi
+  if command -v screen >/dev/null 2>&1; then
+    screen -S "$WEB_SCREEN_NAME" -X quit >/dev/null 2>&1 || true
+  fi
+  web_awake_stop
+}
+
+wait_for_web_port() {
+  PORT="$1"
+  ATTEMPT=0
+  while [ "$ATTEMPT" -lt 30 ]; do
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    ATTEMPT=$((ATTEMPT + 1))
+    sleep 0.5
+  done
+  return 1
+}
+
 if [ "$#" -eq 0 ]; then
   exec "$PYTHON_BIN" -m yuho_auto_extract run-all
 fi
@@ -52,12 +175,48 @@ case "$1" in
   audit)
     exec "$PYTHON_BIN" -m yuho_auto_extract build-algorithm-audit
     ;;
+  xbrl-fact-store)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract build-xbrl-fact-store "$@"
+    ;;
+  major-financial-evidence)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract prepare-major-financial-evidence "$@"
+    ;;
+  xbrl-discovered-metrics)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract prepare-xbrl-discovered-metrics "$@"
+    ;;
+  major-financial-ai-compare)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract compare-major-financial-ai-decisions "$@"
+    ;;
   status)
     exec "$PYTHON_BIN" -m yuho_auto_extract automation-status
     ;;
   annual)
     shift
     exec "$PYTHON_BIN" -m yuho_auto_extract annual-refresh "$@"
+    ;;
+  stock-status)
+    exec "$PYTHON_BIN" -m yuho_auto_extract stock-status
+    ;;
+  stock-refresh)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract stock-refresh "$@"
+    ;;
+  factbook-status)
+    exec "$PYTHON_BIN" -m yuho_auto_extract factbook-status
+    ;;
+  factbook-refresh)
+    shift
+    exec "$PYTHON_BIN" -m yuho_auto_extract factbook-refresh "$@"
+    ;;
+  factbook-validate)
+    exec "$PYTHON_BIN" -m yuho_auto_extract factbook-validate
+    ;;
+  factbook-coverage)
+    exec "$PYTHON_BIN" -m yuho_auto_extract factbook-coverage
     ;;
   roll-forward)
     shift
@@ -67,6 +226,71 @@ case "$1" in
     HOST="${YUHO_WEB_HOST:-127.0.0.1}"
     PORT="${YUHO_WEB_PORT:-8765}"
     exec "$PYTHON_BIN" -m yuho_auto_extract.web_api --host "$HOST" --port "$PORT"
+    ;;
+  web-share)
+    HOST="${YUHO_WEB_HOST:-0.0.0.0}"
+    PORT="${YUHO_WEB_PORT:-8765}"
+    echo "外部接続用Webアプリを起動します: $HOST:$PORT"
+    web_urls "$PORT"
+    exec "$PYTHON_BIN" -m yuho_auto_extract.web_api --host "$HOST" --port "$PORT"
+    ;;
+  web-start)
+    HOST="${YUHO_WEB_HOST:-0.0.0.0}"
+    PORT="${YUHO_WEB_PORT:-8765}"
+    mkdir -p "$RUN_DIR"
+    web_stop_port "$PORT"
+    PYTHON_EXEC="$(command -v "$PYTHON_BIN")"
+    : > "$WEB_LOG_FILE"
+    : > "$WEB_ERR_FILE"
+    if command -v screen >/dev/null 2>&1; then
+      WEB_CMD="cd '$PWD' && YUHO_PROJECT_ROOT='$PWD' PYTHONPATH='$PWD/src' PYTHONPYCACHEPREFIX='${PYTHONPYCACHEPREFIX}' '$PYTHON_EXEC' -m yuho_auto_extract.web_api --host '$HOST' --port '$PORT' >> '$PWD/$WEB_LOG_FILE' 2>> '$PWD/$WEB_ERR_FILE'"
+      screen -dmS "$WEB_SCREEN_NAME" sh -lc "$WEB_CMD"
+      sleep 2
+    else
+      YUHO_PROJECT_ROOT="$PWD" nohup "$PYTHON_EXEC" -m yuho_auto_extract.web_api --host "$HOST" --port "$PORT" > "$WEB_LOG_FILE" 2>"$WEB_ERR_FILE" &
+      PID="$!"
+      echo "$PID" > "$WEB_PID_FILE"
+    fi
+    if ! wait_for_web_port "$PORT"; then
+      echo "Webサーバーの起動に失敗しました。ログ: $WEB_LOG_FILE / $WEB_ERR_FILE" >&2
+      tail -40 "$WEB_LOG_FILE" >&2 || true
+      tail -40 "$WEB_ERR_FILE" >&2 || true
+      exit 1
+    fi
+    ensure_tailscale_serve "$PORT"
+    web_awake_start
+    echo "Webサーバー起動: host=$HOST port=$PORT"
+    if command -v screen >/dev/null 2>&1; then
+      echo "screen: $WEB_SCREEN_NAME"
+    fi
+    if web_awake_running; then
+      echo "スリープ抑止: 有効"
+    fi
+    echo "ログ: $WEB_LOG_FILE / $WEB_ERR_FILE"
+    web_urls "$PORT"
+    ;;
+  web-stop)
+    PORT="${YUHO_WEB_PORT:-8765}"
+    web_stop_port "$PORT"
+    echo "Webサーバーを停止しました: port=$PORT"
+    ;;
+  web-status)
+    PORT="${YUHO_WEB_PORT:-8765}"
+    if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+      lsof -nP -iTCP:"$PORT" -sTCP:LISTEN
+      if command -v screen >/dev/null 2>&1; then
+        screen -ls | sed -n '1,8p'
+      fi
+      if web_awake_running; then
+        echo "スリープ抑止: 有効"
+      else
+        echo "スリープ抑止: 無効"
+      fi
+      web_urls "$PORT"
+    else
+      echo "Webサーバーは待ち受けていません: port=$PORT"
+      exit 1
+    fi
     ;;
   cli)
     shift
@@ -82,10 +306,24 @@ case "$1" in
     echo "  ./yuho report       実行レポート生成"
     echo "  ./yuho ai           AI投入用フォルダ生成"
     echo "  ./yuho audit        アルゴリズム監査パック生成"
+    echo "  ./yuho xbrl-fact-store XBRL Fact Storeを生成"
+    echo "  ./yuho major-financial-evidence 主要財務Evidence Packを生成"
+    echo "  ./yuho xbrl-discovered-metrics 全XBRL数値項目候補を生成"
+    echo "  ./yuho major-financial-ai-compare AI判断比較レポートを生成"
     echo "  ./yuho status       年次自動化・レビュー完了判定を確認"
     echo "  ./yuho annual       年次取得ジョブを実行"
+    echo "  ./yuho stock-status 月次株価取得の状態を確認"
+    echo "  ./yuho stock-refresh 月次株価を取得"
+    echo "  ./yuho factbook-status ファクトブック取得の状態を確認"
+    echo "  ./yuho factbook-refresh ファクトブック/データブックを取得"
+    echo "  ./yuho factbook-validate ファクトブック主要指標を有報と照合"
+    echo "  ./yuho factbook-coverage 建築用途別受注高・完工高の候補状況を出力"
     echo "  ./yuho roll-forward 会社年度マスターをロールフォワード"
     echo "  ./yuho web          ローカルWebアプリ起動"
+    echo "  ./yuho web-share    外部接続用Webアプリ起動（前面）"
+    echo "  ./yuho web-start    外部接続用Webアプリ起動（バックグラウンド）"
+    echo "  ./yuho web-stop     Webアプリ停止"
+    echo "  ./yuho web-status   Webアプリ接続先を表示"
     echo "  ./yuho cli --help   詳細CLIヘルプ"
     exit 2
     ;;

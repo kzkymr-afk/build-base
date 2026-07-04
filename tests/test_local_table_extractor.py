@@ -4,6 +4,39 @@ from yuho_auto_extract.local_table_extractor import extract_local_table_rows
 
 
 class LocalTableExtractorTests(unittest.TestCase):
+    def test_review_derived_zero_value_marker_extracts_zero(self):
+        block = {
+            "run_id": "run",
+            "candidate_block_id": "block",
+            "company_year_id": "MATSUI_2024",
+            "operating_company_id": "MATSUI",
+            "fiscal_year": 2024,
+            "source_doc_id": "doc",
+            "source_file": "xbrl.zip",
+            "section_name": "review_rd_expense",
+            "unit_hint": "百万円",
+            "scope_hint": "consolidated",
+            "locator_score": 10,
+            "heading_text": "研究開発活動",
+            "target_fields": ["rd_expense"],
+            "review_row_labels": ["特記事項なし"],
+            "review_row_labels_by_field": {"rd_expense": ["特記事項なし"]},
+            "review_units_by_field": {"rd_expense": "百万円"},
+            "raw_text": "\n".join(
+                [
+                    "6 【研究開発活動】",
+                    "特記事項なし",
+                ]
+            ),
+        }
+
+        rows = extract_local_table_rows([block])
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["field_id"], "rd_expense")
+        self.assertEqual(rows[0]["value"], 0.0)
+        self.assertEqual(rows[0]["data_scope"], "consolidated")
+
     def test_extracts_current_building_orders_backlog_row(self):
         block = {
             "run_id": "run",
@@ -211,6 +244,8 @@ class LocalTableExtractorTests(unittest.TestCase):
             "scope_hint": "consolidated",
             "locator_score": 10,
             "heading_text": "研究開発活動",
+            "heading_keywords": ["研究開発活動"],
+            "table_keywords": ["研究開発費"],
             "target_fields": ["rd_expense"],
             "review_row_labels_by_field": {"rd_expense": ["研究開発費"]},
             "review_units_by_field": {"rd_expense": "百万円"},
@@ -229,7 +264,77 @@ class LocalTableExtractorTests(unittest.TestCase):
         self.assertEqual(rows[0]["field_id"], "rd_expense")
         self.assertEqual(rows[0]["value"], 1567.0)
         self.assertEqual(rows[0]["unit_raw"], "百万円")
+        self.assertEqual(rows[0]["data_scope"], "consolidated")
         self.assertFalse(rows[0]["review_required"])
+
+    def test_review_hint_rd_expense_scope_uses_value_context_before_block_hint(self):
+        block = {
+            "run_id": "run",
+            "candidate_block_id": "block",
+            "company_year_id": "A_2024",
+            "operating_company_id": "A",
+            "fiscal_year": 2024,
+            "source_doc_id": "doc",
+            "source_file": "xbrl.zip",
+            "section_name": "review_rd_expense",
+            "unit_hint": "百万円",
+            "scope_hint": "standalone",
+            "locator_score": 10,
+            "heading_text": "研究開発活動",
+            "heading_keywords": ["研究開発活動"],
+            "table_keywords": ["研究開発費"],
+            "target_fields": ["rd_expense"],
+            "review_row_labels_by_field": {"rd_expense": ["研究開発費"]},
+            "review_units_by_field": {"rd_expense": "百万円"},
+            "raw_text": "\n".join(
+                [
+                    "研究開発活動】 当社グループは技術開発を推進しております。",
+                    "当連結会計年度 研究開発費 383 百万円",
+                    "なお、提出会社においても研究開発活動を行っております。",
+                ]
+            ),
+        }
+
+        rows = extract_local_table_rows([block])
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["value"], 383.0)
+        self.assertEqual(rows[0]["data_scope"], "consolidated")
+
+    def test_review_hint_employee_scope_prefers_submitting_company_context(self):
+        block = {
+            "run_id": "run",
+            "candidate_block_id": "block",
+            "company_year_id": "A_2024",
+            "operating_company_id": "A",
+            "fiscal_year": 2024,
+            "source_doc_id": "doc",
+            "source_file": "xbrl.zip",
+            "section_name": "review_average_age",
+            "unit_hint": "人",
+            "scope_hint": "consolidated",
+            "locator_score": 10,
+            "heading_text": "従業員の状況",
+            "heading_keywords": ["従業員の状況"],
+            "table_keywords": ["提出会社の状況", "平均年齢"],
+            "target_fields": ["average_age"],
+            "review_row_labels_by_field": {"average_age": ["平均年齢"]},
+            "review_units_by_field": {"average_age": "歳"},
+            "raw_text": "\n".join(
+                [
+                    "提出会社の状況 2025年3月31日 現在",
+                    "従業員数(人) 平均年齢(歳) 平均勤続年数(年)",
+                    "102 [ 1 ] 42.8 14.2",
+                    "(参考)主要な連結子会社の状況",
+                ]
+            ),
+        }
+
+        rows = extract_local_table_rows([block])
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["value"], 42.8)
+        self.assertEqual(rows[0]["data_scope"], "standalone")
 
     def test_review_hint_section_extracts_generic_amount_from_amount_ratio_pairs(self):
         block = {

@@ -16,6 +16,9 @@ REQUIRED_AUDIT_COLUMNS = [
     "segment_taxonomy_status",
     "applies_to_company_id",
     "field_creation_reason",
+    "corroboration_count",
+    "conflict_count",
+    "resolution",
 ]
 
 
@@ -31,6 +34,9 @@ def apply_review_decisions(extracted_rows: Iterable[Dict[str, Any]], reviewed_ro
             if decision == "reject":
                 copied["review_status"] = "rejected"
                 copied["review_required"] = True
+            elif decision == "not_applicable":
+                copied["review_status"] = "not_applicable"
+                copied["review_required"] = False
             elif decision == "correct":
                 copied["value"] = review.get("corrected_value")
                 copied["value_normalized"] = review.get("corrected_value")
@@ -47,7 +53,7 @@ def apply_review_decisions(extracted_rows: Iterable[Dict[str, Any]], reviewed_ro
                 copied.setdefault("review_status", "unreviewed")
             else:
                 copied.setdefault("review_status", "auto_accepted")
-        if copied.get("review_status") != "rejected":
+        if copied.get("review_status") not in {"rejected", "not_applicable"}:
             final.append(copied)
     return final
 
@@ -123,6 +129,9 @@ def build_source_audit(
         "validation_status",
         "review_status",
         "run_id",
+        "corroboration_count",
+        "conflict_count",
+        "resolution",
     ]
     audit_rows: List[Dict[str, Any]] = []
     for row in rows:

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
-from datetime import date
+import json
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from yuho_auto_extract.io_utils import read_table, write_table, write_yaml
@@ -31,6 +32,126 @@ class AutomationTests(unittest.TestCase):
             self.assertFalse(gate["ready"])
             self.assertEqual(gate["active_review_items"], 1)
             self.assertIn("active_review_items=1 exceeds 0", gate["blocking_reasons"])
+
+    def test_review_gate_treats_not_applicable_as_done(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "data" / "review" / "review_queue.csv", [{"company_year_id": "A_2024", "field_id": "cost_labor"}])
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "cost_labor",
+                        "review_decision": "not_applicable",
+                        "applied_status": "not_applicable",
+                    }
+                ],
+            )
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024"}])
+            write_table(root / "data" / "final" / "source_audit.csv", [{"company_year_id": "A_2024", "field_id": "cost_labor"}])
+            write_table(root / "data" / "final" / "field_coverage.csv", [{"field_id": "cost_labor"}])
+
+            gate = automation.review_gate_status(root)
+
+            self.assertEqual(gate["active_review_items"], 0)
+            self.assertEqual(gate["saved_unapplied_reviews"], 0)
+
+    def test_review_gate_requires_recent_algorithm_audit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024"}])
+            write_table(root / "data" / "final" / "source_audit.csv", [{"company_year_id": "A_2024", "field_id": "roe"}])
+            write_table(root / "data" / "final" / "field_coverage.csv", [{"field_id": "roe"}])
+
+            missing = automation.review_gate_status(root)
+
+            self.assertFalse(missing["ready"])
+            self.assertIn("algorithm_audit_missing", missing["blocking_reasons"])
+
+            manifest_path = root / "data" / "algorithm_audit" / "manifest.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            stale_time = datetime.now(timezone.utc) - timedelta(days=30)
+            manifest_path.write_text(json.dumps({"generated_at_utc": stale_time.strftime("%Y-%m-%dT%H:%M:%SZ")}), encoding="utf-8")
+            stale = automation.review_gate_status(root)
+            self.assertFalse(stale["ready"])
+            self.assertTrue(any(reason.startswith("algorithm_audit_stale=") for reason in stale["blocking_reasons"]))
+
+            fresh_time = datetime.now(timezone.utc)
+            manifest_path.write_text(json.dumps({"generated_at_utc": fresh_time.strftime("%Y-%m-%dT%H:%M:%SZ")}), encoding="utf-8")
+            fresh = automation.review_gate_status(root)
+            self.assertTrue(fresh["ready"])
+            self.assertTrue(fresh["algorithm_audit"]["exists"])
+            self.assertFalse(fresh["algorithm_audit"]["stale"])
+
+    def test_review_gate_requires_regression_pass_when_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_yaml(
+                root / "config" / "automation.yml",
+                {
+                    "annual_refresh": {
+                        "review_gate": {
+                            "require_algorithm_audit": False,
+                            "require_regression_pass": True,
+                            "regression_max_age_days": 14,
+                        }
+                    }
+                },
+            )
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024"}])
+            write_table(root / "data" / "final" / "source_audit.csv", [{"company_year_id": "A_2024", "field_id": "roe"}])
+            write_table(root / "data" / "final" / "field_coverage.csv", [{"field_id": "roe"}])
+
+            missing = automation.review_gate_status(root)
+
+            self.assertFalse(missing["ready"])
+            self.assertIn("regression_missing", missing["blocking_reasons"])
+
+            reports_dir = root / "data" / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            stale_time = datetime.now(timezone.utc) - timedelta(days=30)
+            (reports_dir / "regression_summary.json").write_text(
+                json.dumps({"generated_at_utc": stale_time.strftime("%Y-%m-%dT%H:%M:%SZ"), "mismatch_count": 0}),
+                encoding="utf-8",
+            )
+            stale = automation.review_gate_status(root)
+            self.assertFalse(stale["ready"])
+            self.assertTrue(any(reason.startswith("regression_stale=") for reason in stale["blocking_reasons"]))
+
+            fresh_time = datetime.now(timezone.utc)
+            (reports_dir / "regression_summary.json").write_text(
+                json.dumps({"generated_at_utc": fresh_time.strftime("%Y-%m-%dT%H:%M:%SZ"), "mismatch_count": 0}),
+                encoding="utf-8",
+            )
+            fresh = automation.review_gate_status(root)
+            self.assertTrue(fresh["ready"])
+            self.assertTrue(fresh["regression"]["exists"])
+            self.assertFalse(fresh["regression"]["stale"])
+
+            (reports_dir / "regression_summary.json").write_text(
+                json.dumps({"generated_at_utc": fresh_time.strftime("%Y-%m-%dT%H:%M:%SZ"), "mismatch_count": 3}),
+                encoding="utf-8",
+            )
+            mismatched = automation.review_gate_status(root)
+            self.assertFalse(mismatched["ready"])
+            self.assertIn("regression_mismatch_count=3", mismatched["blocking_reasons"])
+
+    def test_review_gate_ignores_regression_when_not_required(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+            write_table(root / "data" / "final" / "final_master_wide.csv", [{"company_year_id": "A_2024"}])
+            write_table(root / "data" / "final" / "source_audit.csv", [{"company_year_id": "A_2024", "field_id": "roe"}])
+            write_table(root / "data" / "final" / "field_coverage.csv", [{"field_id": "roe"}])
+
+            # DEFAULT_AUTOMATION_CONFIGはrequire_regression_pass=False。
+            # regression_summary.jsonが存在しなくてもブロックされない。
+            gate = automation.review_gate_status(root)
+
+            self.assertNotIn("regression_missing", gate["blocking_reasons"])
 
     def test_roll_forward_company_years_copies_latest_company_rule(self):
         with tempfile.TemporaryDirectory() as tmp:

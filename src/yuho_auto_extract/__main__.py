@@ -22,8 +22,12 @@ from .review_queue import build_review_queue
 from .run_reporter import build_run_report, write_run_report
 from .section_locator import locate_candidate_blocks
 from .services.algorithm_audit import build_algorithm_audit_bundle
+from .services.major_financial_evidence import build_major_financial_evidence_pack, compare_major_financial_ai_decisions
+from .services.manual_technicians import import_manual_technicians
+from .services.xbrl_discovered_metrics import build_xbrl_discovered_metrics
 from .validator import attach_validation_status, validate_records
 from .xbrl_csv_parser import extract_xbrl_csv_long
+from .xbrl_fact_store import build_xbrl_fact_store, compare_xbrl_fact_store, extract_from_xbrl_fact_store
 
 
 def main(argv: List[str] = None) -> int:
@@ -80,16 +84,49 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(handler=cmd_run_all)
 
     sub.add_parser("extract-xbrl").set_defaults(handler=cmd_extract_xbrl)
+    p = sub.add_parser("build-xbrl-fact-store")
+    p.add_argument("--doc-id", default="")
+    p.add_argument("--company-year-id", default="")
+    p.set_defaults(handler=cmd_build_xbrl_fact_store)
+    p = sub.add_parser("extract-from-xbrl-fact-store")
+    p.add_argument("--output", default="data/intermediate/xbrl_fact_store_extracted_long.csv")
+    p.add_argument("--write-pipeline", action="store_true")
+    p.set_defaults(handler=cmd_extract_from_xbrl_fact_store)
+    p = sub.add_parser("compare-xbrl-fact-store")
+    p.add_argument("--old", default="data/intermediate/xbrl_extracted_long.parquet")
+    p.add_argument("--new", default="data/intermediate/xbrl_fact_store_extracted_long.csv")
+    p.add_argument("--output", default="data/reports/xbrl_fact_store_compare.csv")
+    p.set_defaults(handler=cmd_compare_xbrl_fact_store)
+    p = sub.add_parser("build-major-financial-evidence")
+    p.add_argument("--chunk-size", default=80, type=int)
+    p.set_defaults(handler=cmd_build_major_financial_evidence)
+    p = sub.add_parser("prepare-major-financial-evidence")
+    p.add_argument("--chunk-size", default=80, type=int)
+    p.set_defaults(handler=cmd_prepare_major_financial_evidence)
+    p = sub.add_parser("build-xbrl-discovered-metrics")
+    p.add_argument("--include-prior-periods", action="store_true")
+    p.set_defaults(handler=cmd_build_xbrl_discovered_metrics)
+    p = sub.add_parser("prepare-xbrl-discovered-metrics")
+    p.add_argument("--include-prior-periods", action="store_true")
+    p.set_defaults(handler=cmd_prepare_xbrl_discovered_metrics)
+    p = sub.add_parser("compare-major-financial-ai-decisions")
+    p.add_argument("--decisions", default="data/ai_evidence/major_financial/ai_decisions.jsonl")
+    p.add_argument("--output", default="data/reports/major_financial_ai_decision_compare.csv")
+    p.set_defaults(handler=cmd_compare_major_financial_ai_decisions)
     sub.add_parser("locate-sections").set_defaults(handler=cmd_locate_sections)
 
     sub.add_parser("normalize").set_defaults(handler=cmd_normalize)
     sub.add_parser("validate").set_defaults(handler=cmd_validate)
+    sub.add_parser("corroborate").set_defaults(handler=cmd_corroborate)
 
     p = sub.add_parser("build-review-queue")
     p.add_argument("--existing-excel", default="")
     p.set_defaults(handler=cmd_build_review_queue)
 
     sub.add_parser("split-local-review").set_defaults(handler=cmd_split_local_review)
+    p = sub.add_parser("import-manual-technicians")
+    p.add_argument("--note-path", default="")
+    p.set_defaults(handler=cmd_import_manual_technicians)
 
     p = sub.add_parser("export-final")
     p.add_argument("--reviewed", default="data/review/review_resolved.xlsx")
@@ -99,6 +136,34 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("report").set_defaults(handler=cmd_report)
     sub.add_parser("build-ai-bundle").set_defaults(handler=cmd_build_ai_bundle)
     sub.add_parser("build-algorithm-audit").set_defaults(handler=cmd_build_algorithm_audit)
+    sub.add_parser("build-corroboration-report").set_defaults(handler=cmd_build_corroboration_report)
+    sub.add_parser("audit-findings").set_defaults(handler=cmd_audit_findings)
+    sub.add_parser("golden-freeze").set_defaults(handler=cmd_golden_freeze)
+    sub.add_parser("backfill-semantics").set_defaults(handler=cmd_backfill_semantics)
+    sub.add_parser("semantics-coverage").set_defaults(handler=cmd_semantics_coverage)
+    p = sub.add_parser("ai-map-observed-items")
+    p.add_argument("--tier", default="bulk", choices=["bulk", "hard", "audit"])
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--taxonomy-kind", dest="taxonomy_kind", default=None,
+                   choices=["jppfs", "jpcrp", "ifrs", "extension", "local"])
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
+    p.add_argument("--no-dry-run", dest="dry_run", action="store_false")
+    p.set_defaults(handler=cmd_ai_map_observed_items)
+    p = sub.add_parser("ai-verify-mappings")
+    p.set_defaults(handler=cmd_ai_verify_mappings)
+    p = sub.add_parser("promote-ai-mappings")
+    p.add_argument("--confirm-verified-maps", dest="confirm_verified_maps", action="store_true", default=None)
+    p.add_argument("--adopt-new-concepts", dest="adopt_new_concepts", action="store_true", default=None)
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
+    p.add_argument("--no-dry-run", dest="dry_run", action="store_false")
+    p.set_defaults(handler=cmd_promote_ai_mappings)
+    p = sub.add_parser("regression-check")
+    p.add_argument("--mode", choices=["light", "full"], default="light")
+    p.set_defaults(handler=cmd_regression_check)
+    p = sub.add_parser("enrich-field-definition")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
+    p.add_argument("--apply", dest="dry_run", action="store_false")
+    p.set_defaults(handler=cmd_enrich_field_definition)
     p = sub.add_parser("automation-status")
     p.add_argument("--fiscal-year", type=int)
     p.set_defaults(handler=cmd_automation_status)
@@ -111,6 +176,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(handler=cmd_annual_refresh)
+    sub.add_parser("stock-status").set_defaults(handler=cmd_stock_status)
+    p = sub.add_parser("stock-refresh")
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--start-date", default="")
+    p.add_argument("--end-date", default="")
+    p.set_defaults(handler=cmd_stock_refresh)
+    sub.add_parser("factbook-status").set_defaults(handler=cmd_factbook_status)
+    p = sub.add_parser("factbook-refresh")
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--dry-run", action="store_true")
+    p.set_defaults(handler=cmd_factbook_refresh)
+    sub.add_parser("factbook-validate").set_defaults(handler=cmd_factbook_validate)
+    sub.add_parser("factbook-coverage").set_defaults(handler=cmd_factbook_coverage)
     sub.add_parser("init-xlsx").set_defaults(handler=cmd_init_xlsx)
     p = sub.add_parser("web")
     p.add_argument("--host", default="127.0.0.1")
@@ -220,8 +299,10 @@ def cmd_run_local(root: Path, args: argparse.Namespace) -> int:
     print(f"xbrl_facts: {counts.get('xbrl_facts', 0)}")
     extract_counts = extract_from_edinet_db(root, db_path, root / "data" / "intermediate" / "db_extracted_long.csv", write_pipeline=True)
     print(f"db_extracted_rows: {extract_counts.get('combined_rows', 0)}")
+    cmd_import_manual_technicians(root, argparse.Namespace(note_path=""))
     cmd_normalize(root, argparse.Namespace())
     cmd_validate(root, argparse.Namespace())
+    cmd_corroborate(root, argparse.Namespace())
     cmd_build_review_queue(root, argparse.Namespace(existing_excel=""))
     split_counts = split_local_review_rows(root)
     print(f"local_auto_accepted: {split_counts.get('accepted_rows', 0)}")
@@ -265,6 +346,86 @@ def cmd_extract_xbrl(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
+    result = build_xbrl_fact_store(root, doc_id=args.doc_id, company_year_id=args.company_year_id)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_extract_from_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
+    output_path = _project_path(root, args.output)
+    result = extract_from_xbrl_fact_store(root, output_path, write_pipeline=args.write_pipeline)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_compare_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
+    result = compare_xbrl_fact_store(
+        root,
+        _project_path(root, args.old),
+        _project_path(root, args.new),
+        _project_path(root, args.output),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_build_major_financial_evidence(root: Path, args: argparse.Namespace) -> int:
+    result = build_major_financial_evidence_pack(root, chunk_size=args.chunk_size)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_prepare_major_financial_evidence(root: Path, args: argparse.Namespace) -> int:
+    fact_store = build_xbrl_fact_store(root)
+    evidence = build_major_financial_evidence_pack(root, chunk_size=args.chunk_size)
+    print(
+        json.dumps(
+            {
+                "xbrl_fact_store": fact_store,
+                "major_financial_evidence": evidence,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_build_xbrl_discovered_metrics(root: Path, args: argparse.Namespace) -> int:
+    result = build_xbrl_discovered_metrics(root, current_year_only=not args.include_prior_periods)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_prepare_xbrl_discovered_metrics(root: Path, args: argparse.Namespace) -> int:
+    fact_store = build_xbrl_fact_store(root)
+    discovered = build_xbrl_discovered_metrics(root, current_year_only=not args.include_prior_periods)
+    print(
+        json.dumps(
+            {
+                "xbrl_fact_store": fact_store,
+                "xbrl_discovered_metrics": discovered,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def cmd_compare_major_financial_ai_decisions(root: Path, args: argparse.Namespace) -> int:
+    result = compare_major_financial_ai_decisions(
+        root,
+        decisions_path=_project_path(root, args.decisions),
+        output_path=_project_path(root, args.output),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_locate_sections(root: Path, args: argparse.Namespace) -> int:
     cfg = load_pipeline_config(root)
     run_id = _run_id()
@@ -287,6 +448,7 @@ def cmd_normalize(root: Path, args: argparse.Namespace) -> int:
     rows: List[Dict[str, Any]] = []
     for path in [
         prefer_existing_table(root / "data" / "intermediate" / "xbrl_extracted_long.parquet"),
+        root / "data" / "intermediate" / "manual_technician_extracted_long.csv",
         root / "data" / "intermediate" / "ai_extracted_long.jsonl",
     ]:
         if path.exists():
@@ -318,15 +480,58 @@ def cmd_validate(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_corroborate(root: Path, args: argparse.Namespace) -> int:
+    from .services import semantics_corroborate
+
+    result = semantics_corroborate.run_corroboration(root)
+    summary = result.get("summary", {})
+    print(f"wrote {result.get('semantics_db_path')}")
+    print(f"wrote {result.get('normalized_long_path')}")
+    for key in sorted(summary):
+        print(f"{key}={summary[key]}")
+    print(f"auto_confirmed={summary.get('auto_confirmed', 0)}")
+    print(f"conflicted={summary.get('conflicted', 0)}")
+    return 0
+
+
 def cmd_build_review_queue(root: Path, args: argparse.Namespace) -> int:
     cfg = load_pipeline_config(root)
     rows = _read_validated_or_normalized(root)
     existing = read_table(Path(args.existing_excel)) if args.existing_excel else []
-    queue = build_review_queue(rows, cfg.field_definition, cfg.company_year_master, existing)
+    exclusions_path = root / "config" / "company_field_exclusions.csv"
+    exclusions = read_table(exclusions_path) if exclusions_path.exists() else []
+    cell_resolutions = _load_cell_resolutions_for_review_queue(root, cfg)
+    queue = build_review_queue(
+        rows, cfg.field_definition, cfg.company_year_master, existing, exclusions, cell_resolutions
+    )
     written = write_table(root / "data" / "review" / "review_queue.xlsx", queue)
     write_table(root / "data" / "review" / "review_queue.csv", queue)
     print(f"wrote {written} rows={len(queue)}")
     return 0
+
+
+def _load_cell_resolutions_for_review_queue(root: Path, cfg) -> Dict[tuple, Dict[str, Any]]:
+    """corroboration.enable_review_downgrade が有効な場合のみ semantics.db から読む。
+
+    安全スイッチ: config/validation_rules.yml の corroboration.enable_review_downgrade
+    が False（明示的に無効化）の場合は None を返し、review_queue.build_review_queue の
+    証拠ベース降格ロジックを完全にバイパスする。
+    """
+    policy = cfg.validation_rules.get("corroboration") or {}
+    if policy.get("enable_review_downgrade") is False:
+        return {}
+    from .services import semantics_store
+
+    db_path = semantics_store.semantics_db_path(root)
+    if not db_path.exists():
+        return {}
+    conn = semantics_store.connect(root)
+    try:
+        raw = semantics_store.fetch_cell_resolutions(conn)
+    finally:
+        conn.close()
+    # raw キーは (company_year_id, concept_id) = review_queue が期待する (company_year_id, field_id) と同一
+    return raw
 
 
 def cmd_split_local_review(root: Path, args: argparse.Namespace) -> int:
@@ -338,6 +543,13 @@ def cmd_split_local_review(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_manual_technicians(root: Path, args: argparse.Namespace) -> int:
+    note_path = Path(args.note_path).expanduser().resolve() if getattr(args, "note_path", "") else None
+    summary = import_manual_technicians(root, note_path=note_path)
+    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
     cfg = load_pipeline_config(root)
     extracted = _read_validated_or_normalized(root)
@@ -345,6 +557,10 @@ def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
     reviewed = read_table(reviewed_path) if reviewed_path.exists() else []
     final_long = apply_review_decisions(extracted, reviewed)
     exportable = filter_exportable_rows(final_long)
+    # P2: normalized_validated_long由来のcorroboration_status列をexporter側の
+    # 列名resolutionへ明示マッピングする（apply_review_decisions自体は変更しない）。
+    for row in exportable:
+        row["resolution"] = row.get("corroboration_status", "")
     long_path = write_table(root / "data" / "final" / "final_master_long.parquet", exportable)
     long_csv_path = write_table(root / "data" / "final" / "final_master_long.csv", exportable)
     wide = build_wide_values(exportable, cfg.company_year_master, cfg.field_definition)
@@ -411,6 +627,168 @@ def cmd_build_algorithm_audit(root: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_corroboration_report(root: Path, args: argparse.Namespace) -> int:
+    from .services.corroboration_report import build_corroboration_report
+
+    result = build_corroboration_report(root)
+    summary = result.get("summary", {})
+    print(f"wrote {result.get('cells_path')}")
+    print(f"cells_total={summary.get('cells_total', 0)}")
+    print(f"corroborated_2plus={summary.get('corroborated_2plus', 0)}")
+    print(f"corroborated_1={summary.get('corroborated_1', 0)}")
+    print(f"corroborated_0={summary.get('corroborated_0', 0)}")
+    print(f"conflicts={summary.get('conflicts', 0)}")
+    return 0
+
+
+def cmd_audit_findings(root: Path, args: argparse.Namespace) -> int:
+    from .services.algorithm_audit_findings import build_algorithm_audit_findings
+
+    result = build_algorithm_audit_findings(root)
+    summary = result.get("summary", {})
+    print(f"wrote {result.get('json_path')}")
+    print(f"total_findings={summary.get('total', 0)}")
+    for kind, count in (summary.get("by_kind") or {}).items():
+        print(f"  {kind}={count}")
+    return 0
+
+
+def cmd_golden_freeze(root: Path, args: argparse.Namespace) -> int:
+    from .services import golden
+
+    result = golden.freeze_golden(root)
+    print(f"golden_cell_count={result.get('golden_cell_count', 0)}")
+    print(f"negative_golden_count={result.get('negative_golden_count', 0)}")
+    for origin, count in sorted((result.get("by_origin") or {}).items()):
+        print(f"by_origin.{origin}={count}")
+    return 0
+
+
+def cmd_backfill_semantics(root: Path, args: argparse.Namespace) -> int:
+    from .services import semantics_backfill
+
+    result = semantics_backfill.backfill_semantics(root)
+    print(f"observed_items_total={result.get('observed_items_total', 0)}")
+    for kind, count in sorted((result.get("observed_items_by_kind") or {}).items()):
+        print(f"observed_items_by_kind.{kind}={count}")
+    print(f"concept_mappings_total={result.get('concept_mappings_total', 0)}")
+    for action, count in sorted((result.get("concept_mappings_by_action") or {}).items()):
+        print(f"concept_mappings_by_action.{action}={count}")
+    return 0
+
+
+def cmd_semantics_coverage(root: Path, args: argparse.Namespace) -> int:
+    from .services import semantics_coverage
+
+    result = semantics_coverage.build_and_write_coverage_report(root)
+    print(f"wrote {result.get('report_json_path')}")
+    summary = result.get("summary", {})
+    print(f"observed_total={summary.get('observed_total', 0)}")
+    print(f"observed_unmapped={summary.get('observed_unmapped', 0)}")
+    print(f"mappings_total={summary.get('mappings_total', 0)}")
+    return 0
+
+
+def cmd_ai_map_observed_items(root: Path, args: argparse.Namespace) -> int:
+    from .ai_runner import ClaudeCliRunner
+    from .services import ai_mapping
+
+    dry_run = bool(args.dry_run)
+    runner = None if dry_run else ClaudeCliRunner()
+    result = ai_mapping.run_ai_mapping_batch(
+        root, runner=runner, tier=args.tier, limit=args.limit, dry_run=dry_run,
+        taxonomy_kind=getattr(args, "taxonomy_kind", None),
+    )
+    print(f"observed_items_targeted={result.get('observed_items_targeted', 0)}")
+    print(f"chunks={result.get('chunks', 0)}")
+    print(f"ai_calls_made={result.get('ai_calls_made', 0)}")
+    print(f"proposals_written={result.get('proposals_written', 0)}")
+    print(f"parse_errors={result.get('parse_errors', 0)}")
+    print(f"dry_run={result.get('dry_run')}")
+    return 0
+
+
+def cmd_ai_verify_mappings(root: Path, args: argparse.Namespace) -> int:
+    from .services import ai_mapping
+
+    result = ai_mapping.verify_ai_proposals_against_corroboration(root)
+    print(f"ai_proposed_total={result.get('ai_proposed_total', 0)}")
+    print(f"likely_confirmable_via_corroboration={result.get('likely_confirmable_via_corroboration', 0)}")
+    return 0
+
+
+def cmd_promote_ai_mappings(root: Path, args: argparse.Namespace) -> int:
+    """P5c: AI提案(map/new_concept)の数値裏取り確定・新概念採用を実行する。
+
+    --confirm-verified-maps / --adopt-new-concepts のいずれも未指定の場合は
+    両方を実行する（既定挙動）。どちらか一方のみ指定した場合はそちらのみ実行。
+    既定は --dry-run（DB書き込みなし、判定結果の表示のみ）。
+    """
+    from .services import mapping_promotion
+
+    dry_run = bool(args.dry_run)
+    run_maps = getattr(args, "confirm_verified_maps", None)
+    run_new_concepts = getattr(args, "adopt_new_concepts", None)
+    if run_maps is None and run_new_concepts is None:
+        run_maps = True
+        run_new_concepts = True
+    else:
+        run_maps = bool(run_maps)
+        run_new_concepts = bool(run_new_concepts)
+
+    if run_maps:
+        map_result = mapping_promotion.promote_verified_map_proposals(root, dry_run=dry_run)
+        print(f"map_proposals_checked={map_result.get('map_proposals_checked', 0)}")
+        print(f"map_corroborated={map_result.get('corroborated', 0)}")
+        print(f"map_not_corroborated={map_result.get('not_corroborated', 0)}")
+
+    if run_new_concepts:
+        concept_result = mapping_promotion.adopt_new_concepts(root, dry_run=dry_run)
+        print(f"new_concept_proposals_checked={concept_result.get('new_concept_proposals_checked', 0)}")
+        print(f"concepts_created={concept_result.get('concepts_created', 0)}")
+        print(f"new_concept_mappings_confirmed={concept_result.get('mappings_confirmed', 0)}")
+
+    print(f"dry_run={dry_run}")
+    return 0
+
+
+def cmd_regression_check(root: Path, args: argparse.Namespace) -> int:
+    from .services import golden
+
+    summary = golden.run_regression(root, mode=args.mode)
+    for key in sorted(summary):
+        print(f"{key}={summary[key]}")
+    return 0 if summary.get("pass") else 1
+
+
+def cmd_enrich_field_definition(root: Path, args: argparse.Namespace) -> int:
+    """P4b: field_definition.csv/.xlsx の増分エンリッチ（確定AI mapの追記＋新概念行追加）。
+
+    既定は --dry-run（計画表示のみ、書き込みなし）。--apply で実際に書き込む。
+    """
+    from .services import field_definition_enrich
+
+    dry_run = bool(args.dry_run)
+    plan = field_definition_enrich.build_enrichment_plan(root)
+    print(f"dry_run={dry_run}")
+    print(f"append_candidates={len(plan['appends'])}")
+    print(f"append_count(with_changes)={plan['append_count']}")
+    for item in plan["appends"]:
+        if item["tags_to_add"]:
+            print(f"  append field_id={item['field_id']} tags_to_add={';'.join(item['tags_to_add'])}")
+    print(f"new_row_count={plan['new_row_count']}")
+    for row in plan["new_rows"]:
+        print(f"  new_row field_id={row['field_id']} field_name_ja={row['field_name_ja']} xbrl_tag_candidates={row['xbrl_tag_candidates']}")
+
+    if dry_run:
+        return 0
+
+    result = field_definition_enrich.apply_enrichment(root)
+    print(f"appended_count={result['appended_count']}")
+    print(f"added_count={result['added_count']}")
+    return 0
+
+
 def cmd_automation_status(root: Path, args: argparse.Namespace) -> int:
     from .services import automation
 
@@ -437,6 +815,66 @@ def cmd_annual_refresh(root: Path, args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         log=print,
     )
+
+
+def cmd_stock_status(root: Path, args: argparse.Namespace) -> int:
+    from .services import market
+
+    result = market.stock_monthly_status(root)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_stock_refresh(root: Path, args: argparse.Namespace) -> int:
+    from .services import market
+
+    start_date = _parse_date(args.start_date) if args.start_date else None
+    end_date = _parse_date(args.end_date) if args.end_date else None
+    if start_date or end_date:
+        result = market.refresh_stock_prices(
+            root,
+            start_date=start_date,
+            end_date=end_date,
+            force=True,
+            dry_run=args.dry_run,
+            log=print,
+        )
+    else:
+        result = market.refresh_stock_prices_if_due(root, force=args.force, dry_run=args.dry_run, log=print)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if str(result.get("status")) in {"succeeded", "partial_success", "dry_run", "skipped"} else 1
+
+
+def cmd_factbook_status(root: Path, args: argparse.Namespace) -> int:
+    from .services import company_factbooks
+
+    result = company_factbooks.factbook_status(root)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_factbook_refresh(root: Path, args: argparse.Namespace) -> int:
+    from .services import company_factbooks
+
+    result = company_factbooks.refresh_company_factbooks(root, force=args.force, dry_run=args.dry_run, log=print)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if str(result.get("status")) in {"succeeded", "partial_success", "dry_run"} else 1
+
+
+def cmd_factbook_validate(root: Path, args: argparse.Namespace) -> int:
+    from .services import company_factbooks
+
+    result = company_factbooks.validate_factbook_against_yuho(root)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if str(result.get("status")) in {"completed", "incomplete"} else 1
+
+
+def cmd_factbook_coverage(root: Path, args: argparse.Namespace) -> int:
+    from .services import company_factbooks
+
+    result = company_factbooks.build_factbook_target_coverage(root)
+    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
 
 
 def cmd_init_xlsx(root: Path, args: argparse.Namespace) -> int:

@@ -11,7 +11,10 @@ annual_refresh:
     max_active_review_items: 0
     max_saved_unapplied_reviews: 0
     require_final_outputs: true
-    require_algorithm_audit: false
+    require_algorithm_audit: true
+    algorithm_audit_max_age_days: 14
+    require_regression_pass: true
+    regression_max_age_days: 14
   schedule:
     engine: launchd
     intended_frequency: daily_during_window
@@ -34,3 +37,31 @@ roll_forward:
     - data_scope_allowed
     - analysis_treatment
 
+stock_price_monthly:
+  enabled: true
+  provider: yahoo_finance_chart
+  cadence: monthly
+  run_day_of_month: 5
+  include_current_month: false
+  initial_start_date: "2015-01-01"
+  request_timeout_seconds: 30
+  retry_count: 2
+  retry_backoff_seconds: 2
+  polite_sleep_seconds: 0.25
+  scheduler_check_interval_seconds: 21600
+  user_agent: "Mozilla/5.0 BuildBase/stock-monthly"
+  canonical_store: data/marts/market/stock_price_monthly.csv
+  raw_store: data/raw/market/yahoo_chart
+  note: "Webアプリ起動中に毎月チェックし、前月末までの月次OHLC・調整後終値・出来高を取得する。"
+
+company_factbooks:
+  enabled: true
+  cadence: annual_or_quarterly
+  canonical_store: data/marts/company_factbooks/building_orders_by_category.csv
+  source_document_store: data/marts/company_factbooks/source_documents.csv
+  raw_store: data/raw/company_factbooks
+  request_timeout_seconds: 30
+  retry_count: 2
+  retry_backoff_seconds: 2
+  polite_sleep_seconds: 0.25
+  note: "鹿島・清水・大林組のパイロット。公式ファクトブック/データブック/決算参考資料から建築受注カテゴリを取得し、用途別は category_type=use として管理する。"
