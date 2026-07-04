@@ -158,6 +158,11 @@ def company_factbook_status() -> Dict[str, Any]:
     return company_factbooks.factbook_status(PROJECT_ROOT)
 
 
+@app.get("/api/company-factbooks/validation-summary")
+def company_factbook_validation_summary(sample_limit: int = Query(12, ge=0, le=50)) -> Dict[str, Any]:
+    return company_factbooks.factbook_validation_summary(PROJECT_ROOT, sample_limit=sample_limit)
+
+
 @app.get("/api/company-factbooks/options")
 def company_factbook_options() -> Dict[str, Any]:
     return company_factbooks.factbook_options(PROJECT_ROOT)

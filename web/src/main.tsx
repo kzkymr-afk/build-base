@@ -57,6 +57,7 @@ import {
   type ExportSettings,
   type FactbookOptions,
   type FactbookStatus,
+  type FactbookValidationSummary,
   type FieldDefinitionResult,
   type FieldDefinitionRow,
   type FieldDefinitionUpdateResult,
@@ -313,6 +314,23 @@ const factbookDocumentListColumns = [
   'file_ext',
   'parser_status'
 ];
+
+const factbookValidationColumnLabels: Record<string, string> = {
+  validation_status: '状態',
+  validation_message: '理由',
+  source_metric_id: '指標',
+  category_type: '分類種別',
+  use_category_normalized: '標準分類',
+  use_category_label: '表示分類',
+  company_name: '会社名',
+  fiscal_year: '年度',
+  factbook_amount_million_yen: 'FB値(百万円)',
+  yuho_field_id: '有報項目ID',
+  yuho_field_name: '有報項目',
+  yuho_value_million_yen: '有報値(百万円)',
+  source_quote: '引用',
+  count: '件数'
+};
 
 const auditListColumns = [
   'value',
@@ -1936,12 +1954,16 @@ function FactbooksPanel({
   const [orders, setOrders] = React.useState<Page | null>(null);
   const [documents, setDocuments] = React.useState<Page | null>(null);
   const [status, setStatus] = React.useState<FactbookStatus | null>(null);
+  const [validation, setValidation] = React.useState<FactbookValidationSummary | null>(null);
   const [error, setError] = React.useState('');
   const { options, error: optionsError, refresh: refreshOptions } = useFactbookOptions();
   const jobRunning = job?.status === 'running';
 
   const loadStatus = React.useCallback(() => {
     api<FactbookStatus>('/api/company-factbooks/status').then(setStatus).catch((err) => setError(String(err)));
+    api<FactbookValidationSummary>('/api/company-factbooks/validation-summary')
+      .then(setValidation)
+      .catch((err) => setError(String(err)));
   }, []);
 
   React.useEffect(() => {
@@ -2047,6 +2069,56 @@ function FactbooksPanel({
           <button className="ghost" onClick={() => startRefresh(true)} disabled={jobRunning}>取得ドライラン</button>
           <button className="ghost" onClick={() => { loadStatus(); refreshOptions(); }} disabled={jobRunning}>ファクトブック再読込</button>
         </div>
+      </div>
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>有報照合ステータス</h2>
+            <p className="muted">
+              {validation?.validated_at_utc ? `最終検証: ${validation.validated_at_utc}` : '照合結果を読み込み中です。'}
+            </p>
+          </div>
+          <span className={`badge ${validation?.status === 'completed' ? 'succeeded' : validation?.status === 'mismatch' ? 'failed' : 'pending'}`}>
+            {validation?.status || '未検証'}
+          </span>
+        </div>
+        <div className="automation-grid">
+          <div className="metric"><small>検証行</small><strong>{validation?.rows ?? '-'}</strong></div>
+          <div className="metric"><small>比較可能</small><strong>{validation?.comparable_rows ?? '-'}</strong></div>
+          <div className="metric"><small>未完了</small><strong className={validation?.incomplete_rows ? 'text-warn' : 'text-ok'}>{validation?.incomplete_rows ?? '-'}</strong></div>
+          <div className="metric"><small>pending</small><strong>{validation?.pending_rows ?? '-'}</strong></div>
+          {Object.entries(validation?.by_status || {}).slice(0, 4).map(([key, value]) => (
+            <div className="metric" key={key}><small>{key}</small><strong>{value}</strong></div>
+          ))}
+        </div>
+        <p className="hint">`no_mapping` は有報側の同粒度フィールド未定義、`missing_yuho_value` はフィールド定義はあるが完成表の値が空欄です。用途別受注を無理に総額へ寄せるマッピングは行いません。</p>
+        <div className="grid two">
+          <div>
+            <h3>未マッピング上位</h3>
+            <DataTable
+              data={validation?.top_no_mapping_categories || []}
+              columns={['category_type', 'use_category_normalized', 'use_category_label', 'source_metric_id', 'count']}
+              columnLabels={factbookValidationColumnLabels}
+              clampAllCells
+            />
+          </div>
+          <div>
+            <h3>有報値欠損上位</h3>
+            <DataTable
+              data={validation?.top_missing_yuho_fields || []}
+              columns={['yuho_field_id', 'yuho_field_name', 'category_type', 'source_metric_id', 'count']}
+              columnLabels={factbookValidationColumnLabels}
+              clampAllCells
+            />
+          </div>
+        </div>
+        <h3>pendingサンプル</h3>
+        <DataTable
+          data={validation?.pending_samples || []}
+          columns={['company_name', 'fiscal_year', 'validation_status', 'validation_message', 'source_metric_id', 'category_type', 'use_category_label', 'factbook_amount_million_yen', 'yuho_field_id', 'source_quote']}
+          columnLabels={factbookValidationColumnLabels}
+          clampAllCells
+        />
       </div>
       <FilterBar>
         <label className="filter-field">

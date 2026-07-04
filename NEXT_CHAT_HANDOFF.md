@@ -1,5 +1,69 @@
 # 次チャット引き継ぎ書
 
+## 2026-07-05 追記: N5〜N7 前進
+
+### 完了したこと
+
+- N5 UI稼働復旧
+  - Webサーバを再起動し、新APIがHTMLではなくJSONを返す状態に復旧。
+  - URL: `http://127.0.0.1:8765/`
+  - Tailnet固定: `http://business-dashboard.tail85c1ee.ts.net:8765/`
+  - ブラウザ目視でファクトブックタブを確認。ダークテーマで `automation-panel` が白背景になる残りバグを修正済み。
+- N6 reconciliation確認
+  - `/api/reconciliation/groups?limit=5` はJSONで `total=0`。
+  - 現行 `review_queue.csv` には `identity_group_mismatch:` がなく、UIのグループ処理対象は今の証拠状態では空。
+  - ただし regression 実行ログでは `needs_reconciliation=919` が残る。次に扱うなら、identity group化の入力条件とreview queue生成ロジックの接続を確認する。
+- N7 ファクトブック照合の見える化
+  - `company_factbooks.factbook_validation_summary()` を追加。
+  - `/api/company-factbooks/validation-summary` を追加。
+  - ファクトブック画面に「有報照合ステータス」「未マッピング上位」「有報値欠損上位」「pendingサンプル」を表示。
+  - `factbook-validate` を再実行し、検証CSVに `period_type` / `source_metric_id` を追加した新列構成で再生成。
+
+### 現在のファクトブック照合基準線
+
+`factbook-validate` 結果:
+
+- `rows=183`
+- `pending_rows=178`
+- `comparable_rows=0`
+- `no_mapping=114`
+- `missing_yuho_value=52`
+- `missing_yuho_row=12`
+- `forecast_not_checked=5`
+- `by_source_metric_id`: `building_orders_by_use=110`, `building_orders_by_business_scope=73`
+
+重要な判断:
+
+- 用途別受注 `building_orders_by_use` は、有報側に同粒度フィールドがまだないため、総額系フィールドへ無理にマッピングしない。
+- `business_scope` は既存フィールドへ対応できるが、完成表側の `segment_orders_*` 値が空欄のため `missing_yuho_value` が残っている。
+
+### 検証
+
+```bash
+./yuho factbook-validate
+./yuho test
+(cd web && npm run build)
+./yuho cli regression-check --mode light
+./yuho web-stop && ./yuho web-start
+```
+
+結果:
+
+- Python全テスト: `359 tests OK`
+- Web build: 成功
+- Golden regression: `pass=True`, `mismatch_count=0`, `golden_cell_count=1710`
+- API疎通: `/api/company-factbooks/validation-summary`, `/api/concepts`, `/api/reconciliation/groups` はJSON返却
+- ブラウザ目視: ファクトブックタブで新ステータス表示、画面エラーなし
+
+### 次にやること
+
+1. N7続き: `building_orders_by_use` を扱う正式方針を決める。選択肢は「有報同粒度フィールドを追加して抽出対象化」または「ファクトブック専用martとして分析表示し、有報照合対象からは外す」。
+2. N7続き: `segment_orders_*` の有報抽出を埋め、`missing_yuho_value=52` を減らす。
+3. N8: 半期全社展開。`KAJIMA_2024H1` のpilotは成立済みなので、2024H1対象社のindex/resolve/download/extractを展開する。年次goldenは引き続き不変ゲート。
+4. メンテ: `main.tsx` 分割を継続。今回も同ファイルに最小差分で追加しており、根本分割は未完。
+
+---
+
 ## 2026-07-05 追記: N1〜N4 実装結果
 
 対象ブランチ/作業ツリーでは、BuildBase UI是正計画後の次期計画 N1〜N4 のうち、N1〜N3の実装・証跡更新とN4の検証を実施した。

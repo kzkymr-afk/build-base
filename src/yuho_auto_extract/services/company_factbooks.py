@@ -100,7 +100,9 @@ VALIDATION_COLUMNS = [
     "company_id",
     "company_name",
     "fiscal_year",
+    "period_type",
     "period_label",
+    "source_metric_id",
     "category_type",
     "use_category_raw",
     "use_category_normalized",
@@ -548,6 +550,80 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return summary
+
+
+def factbook_validation_summary(root: Path, sample_limit: int = 12) -> Dict[str, Any]:
+    summary_path = root / "data" / "reports" / "company_factbook_yuho_validation_summary.json"
+    validation_path = root / "data" / "reports" / "company_factbook_yuho_validation.csv"
+    pending_path = root / "data" / "reports" / "company_factbook_pending_rows.csv"
+    summary = _read_json(summary_path)
+    rows = _read_optional(validation_path)
+    pending_rows = _read_optional(pending_path)
+
+    if not rows and summary:
+        return {
+            **summary,
+            "output_exists": validation_path.exists(),
+            "pending_output_exists": pending_path.exists(),
+            "by_status": summary.get("status_counts") or {},
+            "by_category_type": {},
+            "by_source_metric_id": {},
+            "by_status_category": {},
+            "top_no_mapping_categories": [],
+            "top_missing_yuho_fields": [],
+            "pending_samples": [],
+        }
+
+    by_status = _count_by(rows, "validation_status")
+    by_category_type = _count_by(rows, "category_type")
+    by_source_metric_id = _count_by(rows, "source_metric_id")
+    by_status_category: Dict[str, Dict[str, int]] = {}
+    for row in rows:
+        status = str(row.get("validation_status") or "")
+        category_type = str(row.get("category_type") or "")
+        if not status:
+            continue
+        by_status_category.setdefault(status, {})
+        by_status_category[status][category_type] = by_status_category[status].get(category_type, 0) + 1
+
+    no_mapping_rows = [row for row in rows if str(row.get("validation_status") or "") == "no_mapping"]
+    missing_value_rows = [row for row in rows if str(row.get("validation_status") or "") == "missing_yuho_value"]
+    top_no_mapping_categories = _top_row_groups(no_mapping_rows, ["category_type", "use_category_normalized", "use_category_label", "source_metric_id"])
+    top_missing_yuho_fields = _top_row_groups(missing_value_rows, ["yuho_field_id", "yuho_field_name", "category_type", "source_metric_id"])
+    sample_columns = [
+        "company_name",
+        "fiscal_year",
+        "validation_status",
+        "validation_message",
+        "source_metric_id",
+        "category_type",
+        "use_category_label",
+        "factbook_amount_million_yen",
+        "yuho_field_id",
+        "yuho_value_million_yen",
+        "source_quote",
+    ]
+    samples = [
+        {column: row.get(column, "") for column in sample_columns}
+        for row in pending_rows[: max(0, sample_limit)]
+    ]
+
+    return {
+        **summary,
+        "rows": int(summary.get("rows") or len(rows)),
+        "pending_rows": int(summary.get("pending_rows") or len(pending_rows)),
+        "output_path": str(validation_path),
+        "pending_output_path": str(pending_path),
+        "output_exists": validation_path.exists(),
+        "pending_output_exists": pending_path.exists(),
+        "by_status": by_status,
+        "by_category_type": by_category_type,
+        "by_source_metric_id": by_source_metric_id,
+        "by_status_category": by_status_category,
+        "top_no_mapping_categories": top_no_mapping_categories,
+        "top_missing_yuho_fields": top_missing_yuho_fields,
+        "pending_samples": samples,
+    }
 
 
 def build_factbook_target_coverage(root: Path, output_path: Optional[Path] = None) -> Dict[str, Any]:
@@ -1078,6 +1154,29 @@ def _validation_columns(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{column: row.get(column, "") for column in VALIDATION_COLUMNS} for row in rows]
 
 
+def _count_by(rows: Iterable[Dict[str, Any]], column: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows:
+        value = str(row.get(column) or "")
+        if not value:
+            value = "(blank)"
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def _top_row_groups(rows: Iterable[Dict[str, Any]], columns: Sequence[str], limit: int = 12) -> List[Dict[str, Any]]:
+    groups: Dict[Tuple[str, ...], int] = {}
+    for row in rows:
+        key = tuple(str(row.get(column) or "") for column in columns)
+        groups[key] = groups.get(key, 0) + 1
+    out: List[Dict[str, Any]] = []
+    for key, count in sorted(groups.items(), key=lambda item: (-item[1], item[0]))[:limit]:
+        grouped = {column: value for column, value in zip(columns, key)}
+        grouped["count"] = count
+        out.append(grouped)
+    return out
+
+
 def _target_coverage_columns(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{column: row.get(column, "") for column in TARGET_COVERAGE_COLUMNS} for row in rows]
 
@@ -1475,7 +1574,9 @@ def _validate_factbook_row(
         "company_id": company_id,
         "company_name": row.get("company_name", ""),
         "fiscal_year": fiscal_year,
+        "period_type": row.get("period_type", ""),
         "period_label": row.get("period_label", ""),
+        "source_metric_id": row.get("source_metric_id", ""),
         "category_type": row.get("category_type", ""),
         "use_category_raw": row.get("use_category_raw", ""),
         "use_category_normalized": row.get("use_category_normalized", ""),

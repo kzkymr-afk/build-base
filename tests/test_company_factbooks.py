@@ -288,6 +288,7 @@ class CompanyFactbookTests(unittest.TestCase):
                         "period_type": "annual",
                         "period_label": "2025年3月期",
                         "source_dataset_id": "test_orders",
+                        "source_metric_id": "building_orders_by_business_scope",
                         "category_type": "business_scope",
                         "use_category_raw": "国内建築",
                         "use_category_normalized": "domestic_building",
@@ -306,6 +307,7 @@ class CompanyFactbookTests(unittest.TestCase):
                         "period_type": "annual",
                         "period_label": "2025年3月期",
                         "source_dataset_id": "test_orders",
+                        "source_metric_id": "building_orders_by_business_scope",
                         "category_type": "business_scope",
                         "use_category_raw": "開発事業等",
                         "use_category_normalized": "development_other",
@@ -346,9 +348,17 @@ class CompanyFactbookTests(unittest.TestCase):
             json_rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.json")
             pending_rows = read_table(root / "data" / "reports" / "company_factbook_pending_rows.csv")
             self.assertEqual(rows[0]["validation_status"], "pass")
+            self.assertEqual(rows[0]["period_type"], "annual")
+            self.assertEqual(rows[0]["source_metric_id"], "building_orders_by_business_scope")
             self.assertEqual(rows[1]["validation_status"], "no_mapping")
             self.assertEqual(len(json_rows), 2)
             self.assertEqual(len(pending_rows), 1)
+
+            summary = company_factbooks.factbook_validation_summary(root, sample_limit=1)
+            self.assertEqual(summary["by_status"]["pass"], 1)
+            self.assertEqual(summary["by_status"]["no_mapping"], 1)
+            self.assertEqual(summary["top_no_mapping_categories"][0]["use_category_normalized"], "development_other")
+            self.assertEqual(summary["pending_samples"][0]["validation_status"], "no_mapping")
 
     def test_coverage_counts_business_scope_orders_as_building_order_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:

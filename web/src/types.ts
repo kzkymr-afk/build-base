@@ -187,6 +187,27 @@ export type FactbookStatus = {
   message: string;
 };
 
+export type FactbookValidationSummary = {
+  status?: string;
+  validated_at_utc?: string;
+  rows?: number;
+  comparable_rows?: number;
+  incomplete_rows?: number;
+  pending_rows?: number;
+  status_counts?: Record<string, number>;
+  by_status?: Record<string, number>;
+  by_category_type?: Record<string, number>;
+  by_source_metric_id?: Record<string, number>;
+  by_status_category?: Record<string, Record<string, number>>;
+  top_no_mapping_categories?: Row[];
+  top_missing_yuho_fields?: Row[];
+  pending_samples?: Row[];
+  output_path?: string;
+  pending_output_path?: string;
+  output_exists?: boolean;
+  pending_output_exists?: boolean;
+};
+
 export type FactbookOptions = {
   companies: CompanyOption[];
   years: string[];

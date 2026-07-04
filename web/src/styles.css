@@ -630,6 +630,10 @@ h3 {
   gap: 10px;
 }
 
+.grid.two {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
 .health-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
@@ -637,9 +641,8 @@ h3 {
 .automation-panel {
   display: grid;
   gap: 12px;
-  border-color: rgba(22, 107, 111, 0.16);
-  background:
-    linear-gradient(180deg, #ffffff 0%, #f7fbfb 100%);
+  border-color: var(--border);
+  background: var(--surface);
 }
 
 .automation-grid {
