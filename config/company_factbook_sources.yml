@@ -19,6 +19,8 @@ category_labels:
   logistics: 倉庫・流通施設
   public_cultural: 公共・文化施設
   other_use: その他用途
+  building: 建築
+  civil: 土木
   domestic_building: 国内建築
   domestic_civil: 国内土木
   overseas_building: 海外建築
@@ -208,6 +210,7 @@ company_document_sources:
     source_page_url: https://www.kajima.co.jp/ir/fact/index-j.html
     source_dataset_id: kajima_factbook_all
     source_doc_type: factbook
+    parse_documents: false
 
   - id: taisei_databook_documents
     company_id: TAISEI
@@ -396,6 +399,7 @@ sources:
     company_name: 鹿島建設
     enabled: true
     parser: link_index
+    parse_documents: true
     source_doc_type: q_order
     source_dataset_id: kajima_q_order
     source_metric_id: building_orders_by_use
@@ -434,6 +438,7 @@ sources:
     company_name: 大林組
     enabled: true
     parser: link_index
+    parse_documents: true
     source_doc_type: results_reference
     source_dataset_id: obayashi_results_reference
     source_metric_id: building_orders_by_use

@@ -1,5 +1,70 @@
 # 次チャット引き継ぎ書
 
+## 2026-07-05 追記: N1〜N4 実装結果
+
+対象ブランチ/作業ツリーでは、BuildBase UI是正計画後の次期計画 N1〜N4 のうち、N1〜N3の実装・証跡更新とN4の検証を実施した。
+
+### 完了したこと
+
+- N1 ファクトブック3社実値化
+  - 鹿島 `kajima_q_order`: 四半期受注PDFから年度累計Q4の建築/土木/国内/海外受注を抽出。
+  - 大林 `obayashi_results_reference`: 決算参考資料PDFから2024年度の建築用途別受注10区分を抽出。
+  - 大成 `taisei_databook`: `db2026.zip` 内Excelから2016〜2025年度の用途別受注100行を抽出。
+  - `factbook_ai.py` は `AiRunner` 接続済み。AIは表の意味判断だけに使い、数値採用は既存の有報照合ゲートへ渡す設計。
+  - `factbook-refresh --company/--source/--fiscal-year/--use-ai` を追加。
+- N2 半期対応pilot
+  - `KAJIMA_2024H1` を `target_documents` に正式復帰。EDINET indexは `index --merge` で2024年11月分を既存年次indexへマージ。
+  - 半期XBRLの `CurrentYTDDuration` / `CurrentQuarterInstant` を年次field_definitionの `CurrentYearDuration` / `CurrentYearInstant` から安全に解釈。
+  - `data/intermediate/semiannual_h1_extracted_long.csv` を通常normalizeに取り込み、final long/wideへH1を出す経路を追加。
+  - final確認: `final_master_long.csv` に `KAJIMA_2024H1` 12項目、`final_master_wide.csv` にH1 1行。
+  - API確認: `read_wide(... period_type="semiannual_h1")` / `read_chart_data(... period_type="semiannual_h1")` とも1行返却。
+- N3 証拠鮮度回復と安全修正
+  - `corroborate` / `build-corroboration-report` を再実行。
+  - semantics再照合結果: `auto_confirmed=1501`, `conflicted=55`, `needs_reconciliation=920`。
+  - `KAJIMA_2024 rd_expense=22,207百万円` は `auto_confirmed`。
+  - XBRL `unit_id=pure` は `%` へ変換し、`0.359 -> 35.9%` として扱うよう修正。
+  - 単位不明の金額候補はfield target unitで勝手に採用しない。例: `equity_consolidated` が自己資本比率を自己資本額として採用する事故を `unit_conversion_failed` で停止。
+- N4 検証
+  - Python全テスト: `359 passed`
+  - Web build: `npm run build` 成功
+  - Golden regression: `regression-check --mode light` で `pass=True`, `mismatch_count=0`
+
+### 主要コマンド
+
+```bash
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract factbook-refresh --force --source kajima_q_order
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract factbook-refresh --force --source obayashi_results_reference --fiscal-year 2024
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract factbook-refresh --force --source taisei_databook
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract factbook-coverage
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract factbook-validate
+
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract index --start-date 2024-11-01 --end-date 2024-11-30 --merge
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract resolve --period-type semiannual_h1 --merge
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract build-xbrl-fact-store --company-year-id KAJIMA_2024H1 --merge
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract extract-from-xbrl-fact-store --company-year-id KAJIMA_2024H1 --output data/intermediate/semiannual_h1_extracted_long.csv
+
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract normalize
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract validate
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract export-final --reviewed data/review/review_resolved.csv
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract corroborate
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract build-corroboration-report
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract build-analysis
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract report
+
+PYTHONPATH=src .venv/bin/python -m pytest
+(cd web && npm run build)
+PYTHONPATH=src .venv/bin/python -m yuho_auto_extract regression-check --mode light
+```
+
+### 次に残っていること
+
+- 27新概念は `config/field_definition.csv` に27概念、抽出元には5,508行あるが、final自動採用は6行/3概念に留まる。大半は `multiple_xbrl_candidates`、単位不明、scope mismatchで止めている。無理に自動採用せず、reconciliation/レビューで扱う。
+- `corroboration_cells.csv` の集約レポート上の conflicts は1,226。semanticsのセル解決上は `conflicted=55` まで縮小しているため、次はUIのreconciliationグループ処理で潰す。
+- ファクトブックは3社実値化済みだが、有報照合側のマッピング不足で `factbook-validate` は `no_mapping` が多い。用途別受注と有報側fieldの対応設計が次の焦点。
+- `main.tsx` 分割の残り、UI目視、サーバ再起動確認は未実施。Web buildは通過済み。
+
+---
+
 作成日: 2026-06-22  
 対象プロジェクト: `/Volumes/SSD_External/Business/Materials/2026-06_有報自動抽出/yuho_auto_extract`
 

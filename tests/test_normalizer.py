@@ -24,6 +24,10 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(convert_unit(45.5, "歳", "歳"), 45.5)
         self.assertEqual(convert_unit(45.5, "年", "歳"), 45.5)
 
+    def test_pure_unit_converts_to_percent(self):
+        self.assertEqual(normalize_unit("pure"), "pure")
+        self.assertEqual(convert_unit(0.359, "pure", "%"), 35.9)
+
     def test_average_age_normalizes_without_unit_conversion_review(self):
         row = {"field_id": "average_age", "value": "45.5", "unit_raw": "歳", "data_scope": "standalone"}
         field = {"field_id": "average_age", "target_unit": "歳", "data_scope_required": "standalone"}

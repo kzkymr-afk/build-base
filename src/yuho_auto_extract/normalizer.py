@@ -50,6 +50,8 @@ def normalize_unit(unit_raw: Any) -> Optional[str]:
         return None
     if "%" in text or "％" in text:
         return "%"
+    if text.lower() == "pure":
+        return "pure"
     if "歳" in text or "才" in text:
         return "歳"
     for unit in ("百万円", "千円", "億円", "円", "人", "年"):
@@ -70,6 +72,8 @@ def convert_unit(value: Optional[float], unit_raw: Any, target_unit: str) -> Opt
         return value * AMOUNT_FACTORS_TO_MILLION[source_unit] / AMOUNT_FACTORS_TO_MILLION[target_unit]
     if target_unit == "%" and source_unit == "%":
         return value
+    if target_unit == "%" and source_unit == "pure":
+        return value * 100
     if target_unit in ("人", "年") and source_unit == target_unit:
         return value
     return None

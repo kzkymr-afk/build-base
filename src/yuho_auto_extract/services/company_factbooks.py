@@ -13,10 +13,12 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from yuho_auto_extract.ai_runner import AiRunner, ai_call_result_to_ai_calls_record
 from yuho_auto_extract.io_utils import is_blankish, read_table, read_yaml, write_table
 from yuho_auto_extract.services.automation import merge_records_by_key
 from yuho_auto_extract.services.datasets import paginate
-from yuho_auto_extract.services import factbook_parsers
+from yuho_auto_extract.services import factbook_parsers, semantics_store
+from yuho_auto_extract.services.ai_mapping import load_ai_config
 
 
 FetchText = Callable[[str, Dict[str, Any]], str]
@@ -324,6 +326,11 @@ def refresh_company_factbooks(
     dry_run: bool = False,
     log: Optional[Callable[[str], None]] = None,
     fetcher: Optional[FetchText] = None,
+    ai_runner: Optional[AiRunner] = None,
+    ai_tier: str = "bulk",
+    company_ids: Optional[Sequence[str]] = None,
+    source_ids: Optional[Sequence[str]] = None,
+    fiscal_years: Optional[Sequence[Any]] = None,
 ) -> Dict[str, Any]:
     cfg = _factbook_config(root)
     if not bool(cfg.get("enabled", True)) and not force:
@@ -332,6 +339,22 @@ def refresh_company_factbooks(
         return summary
 
     enabled_sources = [source for source in _configured_sources(cfg) if _bool(source.get("enabled"), True)]
+    requested_company_ids = {str(company_id).strip().upper() for company_id in (company_ids or []) if str(company_id).strip()}
+    if requested_company_ids:
+        enabled_sources = [
+            source
+            for source in enabled_sources
+            if str(source.get("company_id") or "").strip().upper() in requested_company_ids
+        ]
+    requested_source_ids = {str(source_id).strip() for source_id in (source_ids or []) if str(source_id).strip()}
+    if requested_source_ids:
+        enabled_sources = [
+            source
+            for source in enabled_sources
+            if str(source.get("id") or "").strip() in requested_source_ids
+            or str(source.get("source_dataset_id") or "").strip() in requested_source_ids
+        ]
+    requested_fiscal_years = {str(year).strip() for year in (fiscal_years or []) if str(year).strip()}
     canonical_path = _canonical_path(root, cfg)
     documents_path = _source_documents_path(root, cfg)
     raw_dir = _raw_store(root, cfg)
@@ -350,30 +373,56 @@ def refresh_company_factbooks(
         "dry_run": dry_run,
         "errors": [],
         "parser_warnings": [],
+        "ai_calls_made": 0,
+        "company_ids": sorted(requested_company_ids),
+        "source_ids": sorted(requested_source_ids),
+        "fiscal_years": sorted(requested_fiscal_years),
     }
     if log:
-        log(f"[company-factbooks] plan sources={len(enabled_sources)} dry_run={dry_run}")
+        scope = f" companies={','.join(sorted(requested_company_ids))}" if requested_company_ids else ""
+        source_scope = f" source_ids={','.join(sorted(requested_source_ids))}" if requested_source_ids else ""
+        year_scope = f" fiscal_years={','.join(sorted(requested_fiscal_years))}" if requested_fiscal_years else ""
+        log(f"[company-factbooks] plan sources={len(enabled_sources)} dry_run={dry_run}{scope}{source_scope}{year_scope}")
     if dry_run:
         _write_summary(root, summary)
         return summary
 
     fetch = fetcher or _fetch_text
     fetched_at = _now_utc()
+    ai_config = _factbook_ai_config(root, ai_tier) if ai_runner is not None else None
     order_rows: List[Dict[str, Any]] = []
     source_documents: List[Dict[str, Any]] = []
+    successful_dataset_ids: set[str] = set()
     for source in enabled_sources:
         try:
             parser = str(source.get("parser") or "").strip()
             if log:
                 log(f"[company-factbooks] source {source.get('id', '')} parser={parser}")
             parsed_orders, parsed_documents, warnings = _parse_source(root, cfg, source, raw_dir, fetch, fetched_at)
+            if requested_fiscal_years:
+                parsed_orders = [row for row in parsed_orders if _matches_requested_fiscal_year(row, requested_fiscal_years)]
+                parsed_documents = [row for row in parsed_documents if _matches_requested_fiscal_year(row, requested_fiscal_years)]
             if _bool(source.get("parse_documents"), False):
-                document_orders, parsed_documents, document_warnings = _parse_candidate_documents(root, cfg, source, raw_dir, parsed_documents, fetcher, fetched_at)
+                document_orders, parsed_documents, document_warnings, ai_calls = _parse_candidate_documents(
+                    root,
+                    cfg,
+                    source,
+                    raw_dir,
+                    parsed_documents,
+                    fetcher,
+                    fetched_at,
+                    ai_runner=ai_runner,
+                    ai_config=ai_config,
+                )
                 parsed_orders.extend(document_orders)
                 warnings.extend(document_warnings)
+                summary["ai_calls_made"] += ai_calls
             order_rows.extend(parsed_orders)
             source_documents.extend(parsed_documents)
             summary["parser_warnings"].extend(warnings)
+            dataset_id = str(source.get("source_dataset_id") or source.get("id") or "").strip()
+            if dataset_id:
+                successful_dataset_ids.add(dataset_id)
             if log:
                 log(
                     f"[company-factbooks] parsed {source.get('id', '')} "
@@ -394,8 +443,13 @@ def refresh_company_factbooks(
     summary["parser_warnings"].extend(manual_warnings)
 
     normalized_orders = _normalize_order_rows(root, cfg, order_rows)
+    existing_orders_for_merge = [
+        row
+        for row in existing_orders
+        if not _matches_refresh_replace_scope(row, successful_dataset_ids, requested_fiscal_years)
+    ]
     merged_orders = merge_records_by_key(
-        existing_orders,
+        existing_orders_for_merge,
         normalized_orders,
         ["company_id", "fiscal_year", "period_type", "source_dataset_id", "source_metric_id", "category_type", "use_category_raw"],
     )
@@ -537,8 +591,7 @@ def build_factbook_target_coverage(root: Path, output_path: Optional[Path] = Non
                 row
                 for row in company_rows
                 if str(row.get("extraction_status") or "") == "parsed"
-                and str(row.get("source_metric_id") or "") == metric_id
-                and str(row.get("category_type") or "") == "use"
+                and _factbook_row_matches_target_metric(row, metric_id)
             ]
             if parsed_rows:
                 status = "parsed"
@@ -708,15 +761,19 @@ def _parse_candidate_documents(
     documents: List[Dict[str, Any]],
     text_fetcher: Optional[FetchText],
     fetched_at: str,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    *,
+    ai_runner: Optional[AiRunner] = None,
+    ai_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str], int]:
     rows: List[Dict[str, Any]] = []
     warnings: List[str] = []
     parsed_documents: List[Dict[str, Any]] = []
+    ai_calls_made = 0
     source_dir = raw_dir / _safe_name(str(source.get("id") or "source"))
     source_dir.mkdir(parents=True, exist_ok=True)
     for index, document in enumerate(documents, start=1):
         ext = str(document.get("file_ext") or "").lower().lstrip(".")
-        if ext not in {"pdf", "xlsx", "xlsm", "xltx", "xltm", "csv"}:
+        if ext not in {"pdf", "xlsx", "xlsm", "xltx", "xltm", "xls", "csv", "zip"}:
             parsed_documents.append(document)
             continue
         url = str(document.get("url") or "")
@@ -741,7 +798,19 @@ def _parse_candidate_documents(
                 "period_label": document.get("period_label") or source.get("period_label", ""),
                 "fiscal_year": document.get("fiscal_year") or source.get("fiscal_year", ""),
             }
-            parsed_rows, parser_warnings = factbook_parsers.parse_document(path, parser_source, cfg, fetched_at)
+            ai_call_results: List[Any] = []
+            parsed_rows, parser_warnings = factbook_parsers.parse_document(
+                path,
+                parser_source,
+                cfg,
+                fetched_at,
+                ai_runner=ai_runner,
+                ai_config=ai_config,
+                ai_call_results=ai_call_results,
+            )
+            if ai_call_results:
+                ai_calls_made += len(ai_call_results)
+                _record_factbook_ai_calls(root, ai_call_results)
             rows.extend(parsed_rows)
             warnings.extend(parser_warnings)
             parsed_documents.append(
@@ -754,7 +823,7 @@ def _parse_candidate_documents(
         except Exception as exc:
             warnings.append(f"document parse failed source={source.get('id', '')} url={url}: {exc}")
             parsed_documents.append({**document, "parser_status": "pending_parser", "note": _append_note(document.get("note", ""), f"document parse failed: {exc}")})
-    return rows, parsed_documents, warnings
+    return rows, parsed_documents, warnings, ai_calls_made
 
 
 def _extract_link_documents(source: Dict[str, Any], url: str, html: str, fetched_at: str) -> List[Dict[str, Any]]:
@@ -1011,6 +1080,37 @@ def _validation_columns(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _target_coverage_columns(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{column: row.get(column, "") for column in TARGET_COVERAGE_COLUMNS} for row in rows]
+
+
+def _factbook_row_matches_target_metric(row: Dict[str, Any], metric_id: str) -> bool:
+    source_metric_id = str(row.get("source_metric_id") or "")
+    category_type = str(row.get("category_type") or "")
+    if source_metric_id == metric_id and category_type == "use":
+        return True
+    if metric_id == "building_orders_by_use" and source_metric_id == "building_orders_by_business_scope":
+        return category_type == "business_scope"
+    if metric_id == "completed_building_by_use" and source_metric_id == "completed_building_by_business_scope":
+        return category_type == "business_scope"
+    return False
+
+
+def _factbook_ai_config(root: Path, tier: str) -> Dict[str, Any]:
+    ai_config = load_ai_config(root)
+    tiers = ai_config.get("tiers") or {}
+    tier_cfg = tiers.get(tier) or {}
+    return {
+        "tier": tier,
+        "tier_config": tier_cfg,
+        "timeout_seconds": ai_config.get("timeout_seconds"),
+    }
+
+
+def _record_factbook_ai_calls(root: Path, call_results: Sequence[Any]) -> None:
+    if not call_results:
+        return
+    with semantics_store.connect(root) as conn:
+        for call_result in call_results:
+            semantics_store.insert_ai_call(conn, ai_call_result_to_ai_calls_record(call_result))
 
 
 def _write_json_sidecar(path: Path, rows: Iterable[Dict[str, Any]]) -> Path:
@@ -1504,6 +1604,19 @@ def _chart_companies(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, str]]:
 def _latest_period(rows: Sequence[Dict[str, Any]]) -> str:
     periods = [str(row.get("fiscal_year") or "") for row in rows if row.get("fiscal_year")]
     return max(periods, key=_period_sort_key) if periods else ""
+
+
+def _matches_requested_fiscal_year(row: Dict[str, Any], requested_fiscal_years: set[str]) -> bool:
+    return str(row.get("fiscal_year") or "").strip() in requested_fiscal_years
+
+
+def _matches_refresh_replace_scope(row: Dict[str, Any], dataset_ids: set[str], fiscal_years: set[str]) -> bool:
+    dataset_id = str(row.get("source_dataset_id") or "").strip()
+    if not dataset_id or dataset_id not in dataset_ids:
+        return False
+    if fiscal_years and str(row.get("fiscal_year") or "").strip() not in fiscal_years:
+        return False
+    return True
 
 
 def _period_sort_key(value: Any) -> Tuple[int, str]:

@@ -19,10 +19,10 @@ FACT_STORE_DIR = Path("data") / "marts" / "xbrl_fact_store"
 ENCODINGS = ("utf-16", "utf-8-sig", "cp932")
 
 
-def build_xbrl_fact_store(root: Path, doc_id: str = "", company_year_id: str = "") -> Dict[str, Any]:
+def build_xbrl_fact_store(root: Path, doc_id: str = "", company_year_id: str = "", merge_existing: bool = False) -> Dict[str, Any]:
     targets = _target_documents(root)
     selected_targets = list(_select_targets(targets, doc_id=doc_id, company_year_id=company_year_id))
-    fact_rows: List[Dict[str, Any]] = []
+    new_fact_rows: List[Dict[str, Any]] = []
     missing_documents: List[Dict[str, str]] = []
     for target in selected_targets:
         source_doc_id = str(target.get("docID") or target.get("source_doc_id") or "")
@@ -36,7 +36,18 @@ def build_xbrl_fact_store(root: Path, doc_id: str = "", company_year_id: str = "
                 }
             )
             continue
-        fact_rows.extend(_iter_fact_rows(csv_zip, target))
+        new_fact_rows.extend(_iter_fact_rows(csv_zip, target))
+
+    fact_rows = new_fact_rows
+    if merge_existing:
+        selected_company_years = {str(target.get("company_year_id") or "") for target in selected_targets}
+        selected_doc_ids = {str(target.get("docID") or target.get("source_doc_id") or "") for target in selected_targets}
+        fact_rows = [
+            row
+            for row in _read_fact_store(root)
+            if str(row.get("company_year_id") or "") not in selected_company_years
+            and str(row.get("source_doc_id") or "") not in selected_doc_ids
+        ] + new_fact_rows
 
     out_dir = root / FACT_STORE_DIR
     facts_csv = write_table(out_dir / "facts.csv", fact_rows)
@@ -61,8 +72,10 @@ def build_xbrl_fact_store(root: Path, doc_id: str = "", company_year_id: str = "
         "targets": len(selected_targets),
         "documents_missing_csv": len(missing_documents),
         "facts": len(fact_rows),
+        "facts_updated": len(new_fact_rows),
         "contexts": len(context_rows),
         "text_blocks": sum(1 for row in fact_rows if _truthy(row.get("is_text_block"))),
+        "merge_existing": merge_existing,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     return manifest
@@ -72,6 +85,7 @@ def extract_from_xbrl_fact_store(
     root: Path,
     output_path: Path,
     write_pipeline: bool = False,
+    company_year_id: str = "",
 ) -> Dict[str, int]:
     cfg = load_pipeline_config(root)
     facts = _read_fact_store(root)
@@ -81,13 +95,15 @@ def extract_from_xbrl_fact_store(
 
     rows: List[Dict[str, Any]] = []
     run_id = "xbrl-fact-store"
-    targets = list(_select_targets(_target_documents(root)))
+    targets = list(_select_targets(_target_documents(root), company_year_id=company_year_id))
+    if company_year_id and not targets:
+        targets = _targets_from_facts(facts_by_company_year.get(company_year_id, []))
     xbrl_fields = [field for field in cfg.field_definition if str(field.get("preferred_method") or "") == "XBRL_CSV"]
     for target in targets:
         company_year_id = str(target.get("company_year_id") or "")
         target_facts = facts_by_company_year.get(company_year_id, [])
         for field in xbrl_fields:
-            candidates = _match_fact_candidates(target_facts, field)
+            candidates = _match_fact_candidates(target_facts, field, target)
             source_file = Path("xbrl_fact_store:facts")
             if not candidates:
                 rows.append(_not_found_record(field, _target_for_record(target), run_id, source_file))
@@ -180,6 +196,23 @@ def _select_targets(
         if company_year_id and target_company_year_id != company_year_id:
             continue
         yield target
+
+
+def _targets_from_facts(facts: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not facts:
+        return []
+    first = facts[0]
+    return [
+        {
+            "company_year_id": first.get("company_year_id", ""),
+            "operating_company_id": first.get("operating_company_id", ""),
+            "fiscal_year": first.get("fiscal_year", ""),
+            "docID": first.get("source_doc_id", ""),
+            "source_doc_id": first.get("source_doc_id", ""),
+            "period_type": "semiannual_h1" if str(first.get("company_year_id") or "").endswith("H1") else "annual",
+            "resolution_status": "resolved",
+        }
+    ]
 
 
 def _iter_fact_rows(csv_zip_path: Path, target: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
@@ -318,9 +351,9 @@ def _read_fact_store(root: Path) -> List[Dict[str, Any]]:
     return read_table(path) if path.exists() else []
 
 
-def _match_fact_candidates(facts: Sequence[Dict[str, Any]], field: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _match_fact_candidates(facts: Sequence[Dict[str, Any]], field: Dict[str, Any], target: Dict[str, Any]) -> List[Dict[str, Any]]:
     tag_candidates = _split_values(field.get("xbrl_tag_candidates"))
-    context_filters = _split_values(field.get("context_filters"))
+    context_filters = _period_context_filters(_split_values(field.get("context_filters")), str(target.get("period_type") or "annual"))
     if not tag_candidates:
         return []
     rows = [fact for fact in facts if _fact_matches_candidate(fact, tag_candidates)]
@@ -343,7 +376,7 @@ def _fact_matches_context(fact: Dict[str, Any], filters: Sequence[str]) -> bool:
     relative_year = str(fact.get("relative_year") or "")
     period = str(fact.get("period_or_instant") or "")
     scope = str(fact.get("normalized_scope") or "")
-    period_token = next((token for token in filters if token in {"CurrentYearDuration", "CurrentYearInstant"}), "")
+    period_token = next((token for token in filters if token in _PERIOD_CONTEXT_TOKENS), "")
     if period_token and "NonConsolidatedMember" in filters:
         if context != f"{period_token}_NonConsolidatedMember":
             return False
@@ -351,15 +384,15 @@ def _fact_matches_context(fact: Dict[str, Any], filters: Sequence[str]) -> bool:
         if context not in {period_token, f"{period_token}_ConsolidatedMember"}:
             return False
     elif period_token and not context.startswith(period_token):
-        if not (period_token == "CurrentYearDuration" and ("当期" in relative_year or "当年度" in relative_year) and "期間" in period):
-            if not (period_token == "CurrentYearInstant" and ("当期" in relative_year or "当年度" in relative_year) and "時点" in period):
+        if not (_is_duration_period_token(period_token) and _is_current_relative_year(relative_year) and "期間" in period):
+            if not (_is_instant_period_token(period_token) and _is_current_relative_year(relative_year) and "時点" in period):
                 return False
     for token in filters:
         if token in context:
             continue
-        if token == "CurrentYearDuration" and ("当期" in relative_year or "当年度" in relative_year) and "期間" in period:
+        if _is_duration_period_token(token) and _is_current_relative_year(relative_year) and "期間" in period:
             continue
-        if token == "CurrentYearInstant" and ("当期" in relative_year or "当年度" in relative_year) and "時点" in period:
+        if _is_instant_period_token(token) and _is_current_relative_year(relative_year) and "時点" in period:
             continue
         if token == "ConsolidatedMember" and (scope == "consolidated" or (period_token and context == period_token)):
             continue
@@ -367,6 +400,40 @@ def _fact_matches_context(fact: Dict[str, Any], filters: Sequence[str]) -> bool:
             continue
         return False
     return True
+
+
+_PERIOD_CONTEXT_TOKENS = {
+    "CurrentYearDuration",
+    "CurrentYearInstant",
+    "CurrentYTDDuration",
+    "CurrentQuarterInstant",
+}
+
+
+def _period_context_filters(filters: Sequence[str], period_type: str) -> List[str]:
+    if period_type != "semiannual_h1":
+        return list(filters)
+    mapped = []
+    for token in filters:
+        if token == "CurrentYearDuration":
+            mapped.append("CurrentYTDDuration")
+        elif token == "CurrentYearInstant":
+            mapped.append("CurrentQuarterInstant")
+        else:
+            mapped.append(token)
+    return mapped
+
+
+def _is_current_relative_year(relative_year: str) -> bool:
+    return any(token in relative_year for token in ("当期", "当年度", "当四半期", "当中間"))
+
+
+def _is_duration_period_token(token: str) -> bool:
+    return token in {"CurrentYearDuration", "CurrentYTDDuration"}
+
+
+def _is_instant_period_token(token: str) -> bool:
+    return token in {"CurrentYearInstant", "CurrentQuarterInstant"}
 
 
 def _prefer_primary_facts(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

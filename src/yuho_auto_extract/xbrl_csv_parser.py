@@ -84,6 +84,7 @@ def _record_from_csv_row(
 ) -> Dict[str, Any]:
     value = _first_present(row, ["値", "value", "Value", "金額"])
     unit = _first_present(row, ["単位", "unit", "Unit"])
+    unit_id = _first_present(row, ["ユニットID", "unit_id"])
     context = _first_present(row, ["コンテキストID", "contextRef", "context_ref", "コンテキスト"])
     element = _first_present(row, ["要素ID", "element_id", "element", "xbrl_element", "タグ", "tag"])
     label = _first_present(row, ["項目名", "item_name", "label", "名称"])
@@ -99,7 +100,7 @@ def _record_from_csv_row(
         "source_quote": f"{label}: {value}" if label and value is not None else str(value) if value is not None else None,
         "field_id": field.get("field_id"),
         "value_raw": value,
-        "unit_raw": unit or field.get("target_unit"),
+        "unit_raw": unit if unit is not None else unit_id,
         "context_ref": context,
         "xbrl_element": element,
         "data_scope": "segment" if field.get("data_scope_required") == "segment" else _scope_from_row(row) or field.get("data_scope_required"),

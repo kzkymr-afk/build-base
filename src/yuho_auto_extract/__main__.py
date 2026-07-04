@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("index")
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
+    p.add_argument("--merge", action="store_true", help="Merge fetched rows into the existing document_index instead of replacing it.")
     p.set_defaults(handler=cmd_index)
 
     p = sub.add_parser("index-annual")
@@ -57,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("resolve")
     p.add_argument("--fiscal-years", nargs="*", type=int)
     p.add_argument("--period-type", choices=["annual", "semiannual_h1", "all"], default="annual")
+    p.add_argument("--merge", action="store_true", help="Merge resolved rows into the existing target_documents instead of replacing it.")
     p.set_defaults(handler=cmd_resolve)
 
     p = sub.add_parser("download")
@@ -71,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default="data/intermediate/edinet.db")
     p.add_argument("--output", default="data/intermediate/db_extracted_long.csv")
     p.add_argument("--no-pipeline", action="store_true")
+    p.add_argument("--period-type", choices=["annual", "semiannual_h1", "all"], default="annual")
     p.set_defaults(handler=cmd_extract_from_db)
 
     p = sub.add_parser("run-local")
@@ -82,14 +85,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fiscal-years", nargs="*", type=int)
     p.set_defaults(handler=cmd_run_all)
 
-    sub.add_parser("extract-xbrl").set_defaults(handler=cmd_extract_xbrl)
+    p = sub.add_parser("extract-xbrl")
+    p.add_argument("--period-type", choices=["annual", "semiannual_h1", "all"], default="annual")
+    p.set_defaults(handler=cmd_extract_xbrl)
     p = sub.add_parser("build-xbrl-fact-store")
     p.add_argument("--doc-id", default="")
     p.add_argument("--company-year-id", default="")
+    p.add_argument("--merge", action="store_true", help="Replace selected facts while preserving other fact-store rows.")
     p.set_defaults(handler=cmd_build_xbrl_fact_store)
     p = sub.add_parser("extract-from-xbrl-fact-store")
     p.add_argument("--output", default="data/intermediate/xbrl_fact_store_extracted_long.csv")
     p.add_argument("--write-pipeline", action="store_true")
+    p.add_argument("--company-year-id", default="")
     p.set_defaults(handler=cmd_extract_from_xbrl_fact_store)
     p = sub.add_parser("compare-xbrl-fact-store")
     p.add_argument("--old", default="data/intermediate/xbrl_extracted_long.parquet")
@@ -170,6 +177,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("factbook-refresh")
     p.add_argument("--force", action="store_true")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--use-ai", action="store_true")
+    p.add_argument("--ai-tier", default="bulk")
+    p.add_argument("--company", action="append", default=[], help="Limit refresh to a company id. Can be specified multiple times.")
+    p.add_argument("--source", action="append", default=[], help="Limit refresh to a source id or source_dataset_id. Can be specified multiple times.")
+    p.add_argument("--fiscal-year", action="append", default=[], help="Limit parsed source documents to a fiscal year. Can be specified multiple times.")
     p.set_defaults(handler=cmd_factbook_refresh)
     sub.add_parser("factbook-validate").set_defaults(handler=cmd_factbook_validate)
     sub.add_parser("factbook-coverage").set_defaults(handler=cmd_factbook_coverage)
@@ -194,6 +206,10 @@ def cmd_index(root: Path, args: argparse.Namespace) -> int:
         retry_backoff_seconds=int(edinet_cfg.get("retry_backoff_seconds", 2)),
     )
     rows = _collect_index_rows(client, root, _date_range(_parse_date(args.start_date), _parse_date(args.end_date)))
+    if getattr(args, "merge", False):
+        existing_path = prefer_existing_table(root / "data" / "intermediate" / "document_index.parquet")
+        existing = read_table(existing_path) if existing_path.exists() else []
+        rows = _merge_rows_by_key(existing, rows, "docID")
     written = write_table(root / "data" / "intermediate" / "document_index.parquet", rows)
     print(f"wrote {written} rows={len(rows)}")
     return 0
@@ -229,6 +245,10 @@ def cmd_resolve(root: Path, args: argparse.Namespace) -> int:
         fiscal_years=args.fiscal_years,
         period_type=args.period_type,
     )
+    if getattr(args, "merge", False):
+        existing_path = prefer_existing_table(root / "data" / "intermediate" / "target_documents.parquet")
+        existing = read_table(existing_path) if existing_path.exists() else []
+        targets = _merge_rows_by_key(existing, targets, "company_year_id")
     written = write_table(root / "data" / "intermediate" / "target_documents.parquet", targets)
     print(f"wrote {written} rows={len(targets)}")
     return 0
@@ -265,7 +285,13 @@ def cmd_build_edinet_db(root: Path, args: argparse.Namespace) -> int:
 def cmd_extract_from_db(root: Path, args: argparse.Namespace) -> int:
     db_path = _project_path(root, args.db)
     output_path = _project_path(root, args.output)
-    counts = extract_from_edinet_db(root, db_path, output_path, write_pipeline=not args.no_pipeline)
+    counts = extract_from_edinet_db(
+        root,
+        db_path,
+        output_path,
+        write_pipeline=not args.no_pipeline,
+        period_type=getattr(args, "period_type", "annual"),
+    )
     print(f"wrote {output_path}")
     for key in sorted(counts):
         print(f"{key}: {counts[key]}")
@@ -281,7 +307,13 @@ def cmd_run_local(root: Path, args: argparse.Namespace) -> int:
     counts = build_edinet_db(root, db_path)
     print(f"wrote {db_path}")
     print(f"xbrl_facts: {counts.get('xbrl_facts', 0)}")
-    extract_counts = extract_from_edinet_db(root, db_path, root / "data" / "intermediate" / "db_extracted_long.csv", write_pipeline=True)
+    extract_counts = extract_from_edinet_db(
+        root,
+        db_path,
+        root / "data" / "intermediate" / "db_extracted_long.csv",
+        write_pipeline=True,
+        period_type="annual",
+    )
     print(f"db_extracted_rows: {extract_counts.get('combined_rows', 0)}")
     cmd_import_manual_technicians(root, argparse.Namespace(note_path=""))
     cmd_normalize(root, argparse.Namespace())
@@ -323,6 +355,8 @@ def cmd_extract_xbrl(root: Path, args: argparse.Namespace) -> int:
     for target in targets:
         if target.get("resolution_status") != "resolved":
             continue
+        if not _target_period_matches(target, getattr(args, "period_type", "annual")):
+            continue
         csv_zip = root / "data" / "raw" / "documents" / str(target.get("docID")) / "csv.zip"
         rows.extend(extract_xbrl_csv_long(csv_zip, cfg.field_definition, target, run_id))
     written = write_table(root / "data" / "intermediate" / "xbrl_extracted_long.parquet", rows)
@@ -331,14 +365,14 @@ def cmd_extract_xbrl(root: Path, args: argparse.Namespace) -> int:
 
 
 def cmd_build_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
-    result = build_xbrl_fact_store(root, doc_id=args.doc_id, company_year_id=args.company_year_id)
+    result = build_xbrl_fact_store(root, doc_id=args.doc_id, company_year_id=args.company_year_id, merge_existing=getattr(args, "merge", False))
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
 
 def cmd_extract_from_xbrl_fact_store(root: Path, args: argparse.Namespace) -> int:
     output_path = _project_path(root, args.output)
-    result = extract_from_xbrl_fact_store(root, output_path, write_pipeline=args.write_pipeline)
+    result = extract_from_xbrl_fact_store(root, output_path, write_pipeline=args.write_pipeline, company_year_id=getattr(args, "company_year_id", ""))
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
@@ -376,6 +410,7 @@ def cmd_normalize(root: Path, args: argparse.Namespace) -> int:
     rows: List[Dict[str, Any]] = []
     for path in [
         prefer_existing_table(root / "data" / "intermediate" / "xbrl_extracted_long.parquet"),
+        root / "data" / "intermediate" / "semiannual_h1_extracted_long.csv",
         root / "data" / "intermediate" / "manual_technician_extracted_long.csv",
         root / "data" / "intermediate" / "ai_extracted_long.jsonl",
     ]:
@@ -492,8 +527,7 @@ def cmd_export_final(root: Path, args: argparse.Namespace) -> int:
         row["resolution"] = row.get("corroboration_status", "")
     long_path = write_table(root / "data" / "final" / "final_master_long.parquet", exportable)
     long_csv_path = write_table(root / "data" / "final" / "final_master_long.csv", exportable)
-    exportable = [row for row in exportable if _company_year_period_type(str(row.get("company_year_id") or ""), annual_company_years) == "annual"]
-    wide = build_wide_values(exportable, annual_company_years, cfg.field_definition)
+    wide = build_wide_values(exportable, cfg.company_year_master, cfg.field_definition)
     wide_path = write_table(root / "data" / "final" / "wide_values.xlsx", wide)
     audit = build_source_audit(exportable, cfg.field_definition)
     audit_path = write_table(root / "data" / "final" / "source_audit.xlsx", audit)
@@ -519,6 +553,33 @@ def _company_year_period_type(company_year_id: str, annual_company_years: Iterab
     if company_year_id in annual_ids:
         return "annual"
     return "non_annual"
+
+
+def _merge_rows_by_key(existing_rows: Iterable[Dict[str, Any]], new_rows: Iterable[Dict[str, Any]], key_name: str) -> List[Dict[str, Any]]:
+    merged: Dict[str, Dict[str, Any]] = {}
+    order: List[str] = []
+    for row in existing_rows:
+        key = str(row.get(key_name) or "")
+        if not key:
+            continue
+        if key not in merged:
+            order.append(key)
+        merged[key] = dict(row)
+    for row in new_rows:
+        key = str(row.get(key_name) or "")
+        if not key:
+            continue
+        if key not in merged:
+            order.append(key)
+        merged[key] = dict(row)
+    return [merged[key] for key in order]
+
+
+def _target_period_matches(target: Dict[str, Any], period_type: str) -> bool:
+    requested = str(period_type or "annual")
+    if requested == "all":
+        return True
+    return str(target.get("period_type") or "annual") == requested
 
 
 def cmd_build_analysis(root: Path, args: argparse.Namespace) -> int:
@@ -795,9 +856,21 @@ def cmd_factbook_status(root: Path, args: argparse.Namespace) -> int:
 
 
 def cmd_factbook_refresh(root: Path, args: argparse.Namespace) -> int:
+    from .ai_runner import ClaudeCliRunner
     from .services import company_factbooks
 
-    result = company_factbooks.refresh_company_factbooks(root, force=args.force, dry_run=args.dry_run, log=print)
+    runner = ClaudeCliRunner() if bool(getattr(args, "use_ai", False)) and not bool(args.dry_run) else None
+    result = company_factbooks.refresh_company_factbooks(
+        root,
+        force=args.force,
+        dry_run=args.dry_run,
+        log=print,
+        ai_runner=runner,
+        ai_tier=str(getattr(args, "ai_tier", "bulk") or "bulk"),
+        company_ids=getattr(args, "company", []),
+        source_ids=getattr(args, "source", []),
+        fiscal_years=getattr(args, "fiscal_year", []),
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if str(result.get("status")) in {"succeeded", "partial_success", "dry_run"} else 1
 

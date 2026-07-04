@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from yuho_auto_extract.edinet_db import _effective_fact_candidate_count, _extract_segment_record_from_db, _query_fact_candidates
+from yuho_auto_extract.edinet_db import _effective_fact_candidate_count, _extract_segment_record_from_db, _query_fact_candidates, _target_period_matches
 
 
 class EdinetDbSegmentTests(unittest.TestCase):
@@ -11,6 +11,7 @@ class EdinetDbSegmentTests(unittest.TestCase):
         self.conn.execute(
             """
             create table xbrl_facts (
+                id integer primary key autoincrement,
                 company_year_id text,
                 operating_company_id text,
                 fiscal_year integer,
@@ -130,10 +131,37 @@ class EdinetDbSegmentTests(unittest.TestCase):
         self.assertEqual(candidates[0]["value"], "100617000000")
         self.assertEqual(_effective_fact_candidate_count(candidates), 1)
 
+    def test_target_period_matches_defaults_to_annual(self):
+        self.assertTrue(_target_period_matches({"period_type": "annual"}, "annual"))
+        self.assertTrue(_target_period_matches({}, "annual"))
+        self.assertFalse(_target_period_matches({"period_type": "semiannual_h1"}, "annual"))
+        self.assertTrue(_target_period_matches({"period_type": "semiannual_h1"}, "semiannual_h1"))
+        self.assertTrue(_target_period_matches({"period_type": "semiannual_h1"}, "all"))
+
+    def test_xbrl_candidates_map_semiannual_contexts(self):
+        self._insert("jppfs_cor:NetSales", "売上高", "Prior1YTDDuration", "100000000")
+        self._insert("jppfs_cor:NetSales", "売上高", "CurrentYTDDuration", "200000000")
+        candidates = _query_fact_candidates(
+            self.conn,
+            "A_2024",
+            {
+                "xbrl_tag_candidates": "NetSales",
+                "context_filters": "CurrentYearDuration;ConsolidatedMember",
+            },
+            period_type="semiannual_h1",
+        )
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["context_id"], "CurrentYTDDuration")
+        self.assertEqual(candidates[0]["value"], "200000000")
+
     def _insert(self, element_id, item_name, context_id, value):
         self.conn.execute(
             """
-            insert into xbrl_facts values (
+            insert into xbrl_facts(
+                company_year_id, operating_company_id, fiscal_year, source_doc_id, csv_file,
+                element_id, item_name, context_id, relative_year, consolidation_scope,
+                period_or_instant, unit_id, unit, value
+            ) values (
                 'A_2024', 'A', 2024, 'doc', 'file.csv', ?, ?, ?, '当期', '連結', '期間', 'JPY', '円', ?
             )
             """,

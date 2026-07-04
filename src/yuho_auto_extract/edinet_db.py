@@ -44,12 +44,22 @@ def build_edinet_db(root: Path, db_path: Path) -> Dict[str, int]:
         conn.close()
 
 
-def extract_from_edinet_db(root: Path, db_path: Path, output_path: Path, write_pipeline: bool = True) -> Dict[str, int]:
+def extract_from_edinet_db(
+    root: Path,
+    db_path: Path,
+    output_path: Path,
+    write_pipeline: bool = True,
+    period_type: str = "annual",
+) -> Dict[str, int]:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
         fields = [_json_row(row) for row in conn.execute("select row_json from field_definition order by field_id")]
-        targets = [_json_row(row) for row in conn.execute("select row_json from target_documents order by company_year_id")]
+        targets = [
+            target
+            for target in [_json_row(row) for row in conn.execute("select row_json from target_documents order by company_year_id")]
+            if _target_period_matches(target, period_type)
+        ]
         xbrl_rows = _extract_xbrl_from_db(conn, fields, targets)
         blocks = [_json_row(row) for row in conn.execute("select row_json from candidate_blocks")]
         local_rows = extract_local_table_rows(blocks)
@@ -62,6 +72,7 @@ def extract_from_edinet_db(root: Path, db_path: Path, output_path: Path, write_p
             "combined_rows": len(combined),
             "xbrl_rows": len(xbrl_rows),
             "local_rows": len(local_rows),
+            "targets": len(targets),
             "output_written": 1 if written.exists() else 0,
         }
     finally:
@@ -332,7 +343,12 @@ def _extract_xbrl_from_db(conn: sqlite3.Connection, fields: Sequence[Dict[str, A
             if cost_record is not None:
                 rows.append(cost_record)
                 continue
-            candidates = _query_fact_candidates(conn, str(target.get("company_year_id") or ""), field)
+            candidates = _query_fact_candidates(
+                conn,
+                str(target.get("company_year_id") or ""),
+                field,
+                period_type=str(target.get("period_type") or "annual"),
+            )
             source_file = Path("edinet.db:xbrl_facts")
             if not candidates:
                 rows.append(_not_found_record(field, _target_for_record(target), run_id, source_file))
@@ -746,9 +762,17 @@ def _parse_cost_number(token: str) -> Optional[float]:
         return None
 
 
-def _query_fact_candidates(conn: sqlite3.Connection, company_year_id: str, field: Dict[str, Any]) -> List[sqlite3.Row]:
+def _query_fact_candidates(
+    conn: sqlite3.Connection,
+    company_year_id: str,
+    field: Dict[str, Any],
+    period_type: str = "annual",
+) -> List[sqlite3.Row]:
     tag_candidates = [part.strip() for part in str(field.get("xbrl_tag_candidates") or "").split(";") if part.strip()]
-    context_filters = [part.strip() for part in str(field.get("context_filters") or "").split(";") if part.strip()]
+    context_filters = _period_context_filters(
+        [part.strip() for part in str(field.get("context_filters") or "").split(";") if part.strip()],
+        period_type,
+    )
     if not tag_candidates:
         return []
     clauses = ["company_year_id = ?"]
@@ -827,7 +851,7 @@ def _fact_matches_context(row: sqlite3.Row, filters: Sequence[str]) -> bool:
     relative_year = str(row["relative_year"] or "")
     period = str(row["period_or_instant"] or "")
     scope = _fact_scope(row)
-    period_token = next((token for token in filters if token in {"CurrentYearDuration", "CurrentYearInstant"}), "")
+    period_token = next((token for token in filters if token in _PERIOD_CONTEXT_TOKENS), "")
     if period_token and "NonConsolidatedMember" in filters:
         if context != f"{period_token}_NonConsolidatedMember":
             return False
@@ -835,15 +859,15 @@ def _fact_matches_context(row: sqlite3.Row, filters: Sequence[str]) -> bool:
         if context not in {period_token, f"{period_token}_ConsolidatedMember"}:
             return False
     elif period_token and not context.startswith(period_token):
-        if not (period_token == "CurrentYearDuration" and ("当期" in relative_year or "当年度" in relative_year) and "期間" in period):
-            if not (period_token == "CurrentYearInstant" and ("当期" in relative_year or "当年度" in relative_year) and "時点" in period):
+        if not (_is_duration_period_token(period_token) and _is_current_relative_year(relative_year) and "期間" in period):
+            if not (_is_instant_period_token(period_token) and _is_current_relative_year(relative_year) and "時点" in period):
                 return False
     for token in filters:
         if token in context:
             continue
-        if token == "CurrentYearDuration" and ("当期" in relative_year or "当年度" in relative_year) and "期間" in period:
+        if _is_duration_period_token(token) and _is_current_relative_year(relative_year) and "期間" in period:
             continue
-        if token == "CurrentYearInstant" and ("当期" in relative_year or "当年度" in relative_year) and "時点" in period:
+        if _is_instant_period_token(token) and _is_current_relative_year(relative_year) and "時点" in period:
             continue
         if token == "ConsolidatedMember" and (scope == "consolidated" or (period_token and context == period_token)):
             continue
@@ -851,6 +875,40 @@ def _fact_matches_context(row: sqlite3.Row, filters: Sequence[str]) -> bool:
             continue
         return False
     return True
+
+
+_PERIOD_CONTEXT_TOKENS = {
+    "CurrentYearDuration",
+    "CurrentYearInstant",
+    "CurrentYTDDuration",
+    "CurrentQuarterInstant",
+}
+
+
+def _period_context_filters(filters: Sequence[str], period_type: str) -> List[str]:
+    if period_type != "semiannual_h1":
+        return list(filters)
+    mapped = []
+    for token in filters:
+        if token == "CurrentYearDuration":
+            mapped.append("CurrentYTDDuration")
+        elif token == "CurrentYearInstant":
+            mapped.append("CurrentQuarterInstant")
+        else:
+            mapped.append(token)
+    return mapped
+
+
+def _is_current_relative_year(relative_year: str) -> bool:
+    return any(token in relative_year for token in ("当期", "当年度", "当四半期", "当中間"))
+
+
+def _is_duration_period_token(token: str) -> bool:
+    return token in {"CurrentYearDuration", "CurrentYTDDuration"}
+
+
+def _is_instant_period_token(token: str) -> bool:
+    return token in {"CurrentYearInstant", "CurrentQuarterInstant"}
 
 
 def _fact_matches_candidate(row: sqlite3.Row, candidates: Sequence[str]) -> bool:
@@ -903,6 +961,13 @@ def _json(row: Dict[str, Any]) -> str:
 
 def _json_row(row: sqlite3.Row) -> Dict[str, Any]:
     return json.loads(row["row_json"])
+
+
+def _target_period_matches(target: Dict[str, Any], period_type: str) -> bool:
+    requested = str(period_type or "annual")
+    if requested == "all":
+        return True
+    return str(target.get("period_type") or "annual") == requested
 
 
 def _decode(content: bytes) -> str:
