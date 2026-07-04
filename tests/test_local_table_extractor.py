@@ -1,6 +1,6 @@
 import unittest
 
-from yuho_auto_extract.local_table_extractor import extract_local_table_rows
+from yuho_auto_extract.local_table_extractor import extract_local_table_rows, _table_amount_unit
 
 
 class LocalTableExtractorTests(unittest.TestCase):
@@ -300,6 +300,45 @@ class LocalTableExtractorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["value"], 383.0)
         self.assertEqual(rows[0]["data_scope"], "consolidated")
+
+    def test_review_hint_rd_expense_unit_uses_value_context_before_hint(self):
+        block = {
+            "run_id": "run",
+            "candidate_block_id": "block",
+            "company_year_id": "KAJIMA_2024",
+            "operating_company_id": "KAJIMA",
+            "fiscal_year": 2024,
+            "source_doc_id": "doc",
+            "source_file": "xbrl.zip",
+            "section_name": "review_rd_expense",
+            "unit_hint": "億円",
+            "scope_hint": "consolidated",
+            "locator_score": 10,
+            "heading_text": "研究開発活動",
+            "heading_keywords": ["研究開発活動"],
+            "table_keywords": ["研究開発費"],
+            "target_fields": ["rd_expense"],
+            "review_row_labels_by_field": {"rd_expense": ["研究開発費"]},
+            "review_units_by_field": {"rd_expense": "億円"},
+            "raw_text": "\n".join(
+                [
+                    "研究開発活動",
+                    "投資額は総額2,500億円である。",
+                    "当連結会計年度における研究開発費は 22,207 百万円である。",
+                ]
+            ),
+        }
+
+        rows = extract_local_table_rows([block])
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["company_year_id"], "KAJIMA_2024")
+        self.assertEqual(rows[0]["value"], 22207.0)
+        self.assertEqual(rows[0]["unit_raw"], "百万円")
+
+    def test_table_amount_unit_prefers_local_value_context(self):
+        segment = "受注実績 単位:億円 建築事業 1,000 2,000 百万円"
+        self.assertEqual(_table_amount_unit(segment, {"unit_hint": "億円"}, "建築事業 1,000 2,000 百万円"), "百万円")
 
     def test_review_hint_employee_scope_prefers_submitting_company_context(self):
         block = {
@@ -1216,6 +1255,7 @@ class LocalTableExtractorTests(unittest.TestCase):
         self.assertEqual(by_field["segment_orders_domestic_civil"]["value"], 199006.0)
         self.assertEqual(by_field["segment_orders_domestic_building"]["value"], 179900.0)
         self.assertEqual(by_field["segment_orders_overseas_construction"]["value"], 101651.0)
+        self.assertEqual(by_field["segment_orders_domestic_building"]["unit_raw"], "百万円")
         self.assertEqual(by_field["segment_orders_domestic_building"]["data_scope"], "segment")
         self.assertFalse(by_field["segment_orders_domestic_building"]["review_required"])
 

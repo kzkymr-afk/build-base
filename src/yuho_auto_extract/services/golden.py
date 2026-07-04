@@ -71,6 +71,15 @@ _SHADOW_INTERMEDIATE_FILES_LIGHT = [
     "manual_technician_extracted_long.csv",
 ]
 
+_SHADOW_INTERMEDIATE_FILES_FULL = [
+    "document_index.csv",
+    "document_index.parquet",
+    "target_documents.csv",
+    "target_documents.parquet",
+    "candidate_blocks.jsonl",
+    "manual_technician_extracted_long.csv",
+]
+
 
 # ---------------------------------------------------------------------------
 # freeze_golden
@@ -329,6 +338,13 @@ def _prepare_shadow_root(root: Path, shadow_root: Path, *, mode: str) -> None:
             if src.exists():
                 shutil.copy2(src, shadow_root / "data" / "intermediate" / name)
     else:
+        for name in _SHADOW_INTERMEDIATE_FILES_FULL:
+            src = root / "data" / "intermediate" / name
+            if src.exists():
+                _link_or_copy(src, shadow_root / "data" / "intermediate" / name)
+        raw_src = root / "data" / "raw"
+        if raw_src.exists():
+            _link_or_copy(raw_src, shadow_root / "data" / "raw")
         # フルモード: build_edinet_db をshadow_root内の一時DBパスに対して呼ぶ。
         # edinet_db.py:22 の db_path.unlink() 挙動を考慮し、本物の
         # data/intermediate/edinet.db は絶対に渡さない（このパスは
@@ -343,6 +359,17 @@ def _prepare_shadow_root(root: Path, shadow_root: Path, *, mode: str) -> None:
             shadow_root / "data" / "intermediate" / "db_extracted_long.csv",
             write_pipeline=True,
         )
+
+
+def _link_or_copy(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dst.symlink_to(src, target_is_directory=src.is_dir())
+    except OSError:
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(src, dst)
 
 
 def _run_shadow_pipeline(shadow_root: Path, *, mode: str) -> None:

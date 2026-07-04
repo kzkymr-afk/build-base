@@ -276,7 +276,7 @@ def _review_generic_values(
             next_label_start = min(
                 [int(item["start"]) for item in matches if int(item["start"]) > int(match["end"])] or [len(line)]
             )
-            unit = _review_generic_unit(block, field_id, line)
+            unit = _review_generic_unit(block, field_id, line, int(match["end"]), next_label_start)
             value = _review_value_after_label(lines, line_index, int(match["end"]), next_label_start, unit)
             if value is None and _review_zero_value_line(line):
                 value = 0.0
@@ -366,15 +366,25 @@ def _review_generic_label_matches(line: str, labels_by_field: Dict[str, List[str
     return deduped
 
 
-def _review_generic_unit(block: Dict[str, Any], field_id: str, line: str) -> str:
+def _review_generic_unit(
+    block: Dict[str, Any],
+    field_id: str,
+    line: str,
+    label_end: int = 0,
+    next_label_start: Optional[int] = None,
+) -> str:
+    local_text = unicodedata.normalize("NFKC", line[label_end:next_label_start])
+    local_unit = _amount_unit_in_text(local_text)
+    if local_unit:
+        return local_unit
     units_by_field = block.get("review_units_by_field", {})
     if isinstance(units_by_field, dict):
         unit = str(units_by_field.get(field_id) or "").strip()
         if unit:
             return unit
-    for unit in ("百万円", "千円", "億円", "円", "%", "人", "歳", "年"):
-        if unit in unicodedata.normalize("NFKC", line):
-            return unit
+    line_unit = _amount_unit_in_text(line)
+    if line_unit:
+        return line_unit
     return str(block.get("unit_hint") or "")
 
 
@@ -511,10 +521,10 @@ def _extract_orders_backlog(block: Dict[str, Any]) -> List[Dict[str, Any]]:
     text = _normalize_text(str(block.get("raw_table_markdown") or block.get("raw_text") or ""))
     segment = _orders_backlog_segment(text)
     lines = _lines(segment)
-    unit = _table_amount_unit(segment, block)
     row_index, values = _find_last_building_row(lines)
     if row_index is None or values is None:
         return []
+    unit = _table_amount_unit(segment, block, lines[row_index])
     values = _canonical_order_values(values)
     row_equation_pass = _orders_row_equation_pass(values)
     out: List[Dict[str, Any]] = []
@@ -547,10 +557,10 @@ def _extract_domestic_building_orders_backlog(block: Dict[str, Any]) -> List[Dic
     text = _normalize_text(str(block.get("raw_table_markdown") or block.get("raw_text") or ""))
     segment = _orders_backlog_segment(text)
     lines = _lines(segment)
-    unit = _table_amount_unit(segment, block)
     row_index, values = _find_last_domestic_building_row(lines)
     if row_index is None or values is None:
         return []
+    unit = _table_amount_unit(segment, block, lines[row_index])
     values = _canonical_order_values(values)
     row_equation_pass = _orders_row_equation_pass(values)
     out: List[Dict[str, Any]] = []
@@ -585,10 +595,10 @@ def _extract_building_order_breakdown(block: Dict[str, Any]) -> List[Dict[str, A
     if not _looks_like_order_breakdown_table(segment):
         return []
     lines = _lines(segment)
-    unit = _table_amount_unit(segment, block)
     row_index, values = _find_current_building_breakdown_row(lines, min_values=4)
     if row_index is None or values is None:
         return []
+    unit = _table_amount_unit(segment, block, lines[row_index])
 
     mapped_values = _map_order_breakdown_values(values)
     out: List[Dict[str, Any]] = []
@@ -658,10 +668,10 @@ def _extract_customer_breakdown_fields(
     pattern_name: str,
 ) -> List[Dict[str, Any]]:
     lines = _lines(segment)
-    unit = _table_amount_unit(segment, block)
     row_index, values = _find_current_building_breakdown_row(lines)
     if row_index is None or values is None:
         return []
+    unit = _table_amount_unit(segment, block, lines[row_index])
 
     mapped_values = _map_customer_breakdown_values(values, segment)
     out: List[Dict[str, Any]] = []
@@ -739,11 +749,11 @@ def _extract_segment_order_table_rows(block: Dict[str, Any], text: str) -> List[
     if not segment or "受注実績" not in segment or "セグメントの名称" not in segment:
         return []
     lines = _lines(segment)
-    unit = _table_amount_unit(segment, block)
     out: List[Dict[str, Any]] = []
     current_values_by_field: Dict[str, float] = {}
     row_index_by_field: Dict[str, int] = {}
     label_by_field: Dict[str, str] = {}
+    unit_by_field: Dict[str, str] = {}
     for row_index, line in enumerate(lines):
         label = _segment_order_label_for_line(line)
         if not label:
@@ -754,9 +764,11 @@ def _extract_segment_order_table_rows(block: Dict[str, Any], text: str) -> List[
             values = _amount_numbers_in_text(" ".join(lines[row_index : min(len(lines), row_index + 4)]))
         if len(values) < 2:
             continue
+        unit = _table_amount_unit(segment, block, line)
         current_values_by_field[field_id] = values[1]
         row_index_by_field[field_id] = row_index
         label_by_field[field_id] = label
+        unit_by_field[field_id] = unit
 
     for field_id, value in current_values_by_field.items():
         out.append(
@@ -769,7 +781,7 @@ def _extract_segment_order_table_rows(block: Dict[str, Any], text: str) -> List[
                 confidence=0.88,
                 review_reason="",
                 notes="Extracted by deterministic local table parser: segment order table.",
-                unit=unit,
+                unit=unit_by_field[field_id],
                 review_required=False,
                 data_scope="segment",
                 **_common_segment_metadata(field_id, label_by_field.get(field_id, "")),
@@ -1355,17 +1367,31 @@ def _compact_label(line: str) -> str:
     return re.sub(r"\s+", "", normalized)
 
 
-def _table_amount_unit(segment: str, block: Dict[str, Any]) -> str:
+def _table_amount_unit(segment: str, block: Dict[str, Any], local_text: str = "") -> str:
+    local_unit = _money_unit_in_text(local_text)
+    if local_unit:
+        return local_unit
     compact = unicodedata.normalize("NFKC", segment)
-    if "千円" in compact:
-        return "千円"
-    if "百万円" in compact:
-        return "百万円"
-    if "億円" in compact:
-        return "億円"
-    if "円" in compact:
-        return "円"
+    segment_unit = _money_unit_in_text(compact)
+    if segment_unit:
+        return segment_unit
     return str(block.get("unit_hint") or "百万円")
+
+
+def _money_unit_in_text(text: str) -> str:
+    compact = unicodedata.normalize("NFKC", text)
+    for unit in ("百万円", "千円", "億円", "円"):
+        if unit in compact:
+            return unit
+    return ""
+
+
+def _amount_unit_in_text(text: str) -> str:
+    compact = unicodedata.normalize("NFKC", text)
+    for unit in ("百万円", "千円", "億円", "%", "人", "歳", "年", "円"):
+        if unit in compact:
+            return unit
+    return ""
 
 
 def _parse_number_or_dash(text: str) -> Optional[float]:
