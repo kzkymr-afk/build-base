@@ -311,6 +311,38 @@ class FreezeGoldenTests(unittest.TestCase):
 
             self.assertTrue((root / "data" / "marts" / "semantics" / "golden_values.csv").exists())
 
+    def test_read_golden_summary_counts_origins(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_resolved.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "rd_expense",
+                        "review_decision": "correct",
+                        "corrected_value": "2177.0",
+                        "applied_status": "applied",
+                        "applied_value": "2177.0",
+                    },
+                    {
+                        "company_year_id": "B_2024",
+                        "field_id": "roe",
+                        "review_decision": "not_applicable",
+                        "applied_status": "applied",
+                    },
+                ],
+            )
+
+            golden.freeze_golden(root)
+            summary = golden.read_golden_summary(root)
+
+            self.assertEqual(summary["status"], "ready")
+            self.assertEqual(summary["golden_cell_count"], 1)
+            self.assertEqual(summary["negative_golden_count"], 1)
+            self.assertEqual(summary["by_origin"]["human_correct"], 1)
+            self.assertEqual(summary["by_origin"]["human_not_applicable"], 1)
+
 
 # ---------------------------------------------------------------------------
 # run_regression: 実パイプラインをshadow_root上で再実行してdiffする

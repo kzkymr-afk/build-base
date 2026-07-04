@@ -235,6 +235,28 @@ export type AlgorithmAuditResult = {
   readme_path: string;
 };
 
+export type RegressionSummary = {
+  status?: string;
+  pass?: boolean;
+  mode?: string;
+  generated_at_utc?: string;
+  golden_cell_count?: number;
+  gated_golden_count?: number;
+  negative_golden_count?: number;
+  mismatch_count?: number;
+  missing_in_actual_count?: number;
+  value_mismatch_count?: number;
+  negative_golden_violations?: number;
+};
+
+export type GoldenSummary = {
+  status?: string;
+  golden_cell_count: number;
+  negative_golden_count: number;
+  by_origin: Record<string, number>;
+  latest_decided_at_utc?: string;
+};
+
 export type CorroborationSummary = {
   status?: string;
   cells_total?: number;
@@ -390,4 +412,3 @@ export type ChartRenderOptions = {
   exportMode: boolean;
   exportSettings: ExportSettings;
 };
-

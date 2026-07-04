@@ -277,6 +277,42 @@ def read_regression_summary(root: Path) -> Dict[str, Any]:
     return json.loads(summary_path.read_text(encoding="utf-8"))
 
 
+def read_golden_summary(root: Path) -> Dict[str, Any]:
+    """GET APIから使うgolden集合の軽量サマリー。"""
+    db_path = semantics_store.semantics_db_path(root)
+    if not db_path.exists():
+        return {"status": "not_built", "golden_cell_count": 0, "negative_golden_count": 0, "by_origin": {}}
+    conn = semantics_store.connect(root)
+    try:
+        golden_rows = semantics_store.fetch_golden_values(conn)
+        negative_rows = semantics_store.fetch_golden_negative(conn)
+    finally:
+        conn.close()
+
+    by_origin: Dict[str, int] = {}
+    latest_decided_at = ""
+    for row in golden_rows.values():
+        origin = str(row.get("origin") or "")
+        by_origin[origin] = by_origin.get(origin, 0) + 1
+        decided_at = str(row.get("decided_at_utc") or "")
+        if decided_at > latest_decided_at:
+            latest_decided_at = decided_at
+    for row in negative_rows.values():
+        origin = str(row.get("origin") or GOLDEN_ORIGIN_NEGATIVE)
+        by_origin[origin] = by_origin.get(origin, 0) + 1
+        decided_at = str(row.get("decided_at_utc") or "")
+        if decided_at > latest_decided_at:
+            latest_decided_at = decided_at
+
+    return {
+        "status": "ready",
+        "golden_cell_count": len(golden_rows),
+        "negative_golden_count": len(negative_rows),
+        "by_origin": by_origin,
+        "latest_decided_at_utc": latest_decided_at,
+    }
+
+
 def _prepare_shadow_root(root: Path, shadow_root: Path, *, mode: str) -> None:
     (shadow_root / "config").mkdir(parents=True, exist_ok=True)
     (shadow_root / "data" / "intermediate").mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,5 @@
 export const tabs = [
+  ['home', 'ホーム'],
   ['run', '実行'],
   ['results', '結果'],
   ['fields', '項目整理'],
@@ -11,6 +12,29 @@ export const tabs = [
   ['algorithm_audit_findings', 'アルゴリズム監査'],
   ['ai', 'AI分析'],
   ['report', 'レポート']
+] as const;
+
+export const tabGroups = [
+  {
+    label: 'ホーム',
+    items: ['home']
+  },
+  {
+    label: 'データ',
+    items: ['results', 'charts', 'stocks', 'factbooks', 'audit']
+  },
+  {
+    label: '品質レビュー',
+    items: ['review', 'mapping_review', 'algorithm_audit_findings']
+  },
+  {
+    label: '運用',
+    items: ['run', 'report', 'ai']
+  },
+  {
+    label: '設定',
+    items: ['fields']
+  }
 ] as const;
 
 export const APP_VERSION_FALLBACK = '0.17.2';

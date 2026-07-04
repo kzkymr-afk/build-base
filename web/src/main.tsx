@@ -27,6 +27,7 @@ import {
   baseColumnLabels,
   baseColumns,
   resultHiddenColumns,
+  tabGroups,
   tabs
 } from './constants';
 import {
@@ -58,12 +59,14 @@ import {
   type FieldDefinitionRow,
   type FieldDefinitionUpdateResult,
   type FieldOption,
+  type GoldenSummary,
   type Job,
   type LegendPosition,
   type MappingProposal,
   type MappingProposalsResult,
   type Options,
   type Page,
+  type RegressionSummary,
   type ReviewTarget,
   type Row,
   type SeriesRenderKind,
@@ -409,7 +412,7 @@ function useFactbookOptions() {
 }
 
 function App() {
-  const [tab, setTab] = React.useState<(typeof tabs)[number][0]>('run');
+  const [tab, setTab] = React.useState<(typeof tabs)[number][0]>('home');
   const [theme, setTheme] = React.useState<'dark' | 'light'>(() => {
     const saved = window.localStorage.getItem('buildbase-theme');
     return saved === 'light' ? 'light' : 'dark';
@@ -465,11 +468,21 @@ function App() {
             <small>Construction Data Workbench</small>
           </div>
         </div>
-        <nav>
-          {tabs.map(([key, label]) => (
-            <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-              {label}
-            </button>
+        <nav className="nav-groups">
+          {tabGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <span>{group.label}</span>
+              {group.items.map((itemKey) => {
+                const tabItem = tabs.find(([key]) => key === itemKey);
+                if (!tabItem) return null;
+                const [key, label] = tabItem;
+                return (
+                  <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </nav>
         <div className="status-box">
@@ -498,6 +511,7 @@ function App() {
             <button onClick={() => setError('')}>閉じる</button>
           </div>
         )}
+        {tab === 'home' && <HomeDashboardPanel status={status} job={job} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'run' && <RunPanel job={job} onJob={setJob} onError={setError} onRefreshStatus={refreshStatus} status={status} />}
         {tab === 'results' && (
           <ResultsPanel
@@ -521,6 +535,124 @@ function App() {
         v{status?.app_version || APP_VERSION_FALLBACK}
       </div>
     </div>
+  );
+}
+
+function HomeDashboardPanel({
+  status,
+  job,
+  onJob,
+  onError,
+  refreshToken
+}: {
+  status: Status | null;
+  job: Job | null;
+  onJob: (job: Job) => void;
+  onError: (message: string) => void;
+  refreshToken: number;
+}) {
+  const [regression, setRegression] = React.useState<RegressionSummary | null>(null);
+  const [goldenSummary, setGoldenSummary] = React.useState<GoldenSummary | null>(null);
+  const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
+  const [error, setError] = React.useState('');
+  const jobRunning = job?.status === 'running';
+
+  const refresh = React.useCallback(() => {
+    api<RegressionSummary>('/api/regression/summary').then(setRegression).catch((err) => setError(String(err)));
+    api<GoldenSummary>('/api/golden/summary').then(setGoldenSummary).catch((err) => setError(String(err)));
+    api<AutomationStatus>('/api/automation/status').then(setAutomation).catch((err) => setError(String(err)));
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh, refreshToken]);
+
+  async function startJob(path: string, body?: Record<string, unknown>) {
+    if (jobRunning) {
+      onError('ジョブ実行中です。作業ログの完了を待ってから次の操作を実行してください。');
+      return;
+    }
+    try {
+      const next = await api<Job>(path, {
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined
+      });
+      onJob(next);
+      window.setTimeout(refresh, 1200);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+
+  const regressionPass = regression?.pass === true;
+  const regressionBuilt = regression?.status !== 'not_built' && regression != null;
+  const files = status?.files || {};
+
+  return (
+    <section className="stack dashboard-home">
+      <div className="dashboard-grid">
+        <div className="panel metric-panel">
+          <small>Golden</small>
+          <strong>{goldenSummary?.golden_cell_count ?? '-'}</strong>
+          <span>negative {goldenSummary?.negative_golden_count ?? '-'}</span>
+        </div>
+        <div className="panel metric-panel">
+          <small>Regression</small>
+          <strong className={regressionPass ? 'text-ok' : regressionBuilt ? 'text-warn' : ''}>
+            {regressionBuilt ? regressionPass ? 'PASS' : 'CHECK' : '未実行'}
+          </strong>
+          <span>{regression?.mode || 'light/full'}</span>
+        </div>
+        <div className="panel metric-panel">
+          <small>レビュー残</small>
+          <strong>{automation?.review_gate.active_review_items ?? '-'}</strong>
+          <span>未反映 {automation?.review_gate.saved_unapplied_reviews ?? '-'}</span>
+        </div>
+        <div className="panel metric-panel">
+          <small>監査</small>
+          <strong>{files.algorithm_audit ? 'あり' : '未生成'}</strong>
+          <span>{status?.algorithm_audit_generated_at_utc || '-'}</span>
+        </div>
+      </div>
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>品質ゲート</h2>
+            <p className="muted">golden凍結と回帰チェックをここから実行します。</p>
+          </div>
+          <span className={`badge ${regressionPass ? 'succeeded' : 'pending'}`}>
+            {regressionPass ? '回帰OK' : '確認待ち'}
+          </span>
+        </div>
+        {error && <InlineError message={error} />}
+        <div className="toolbar">
+          <button onClick={() => startJob('/api/jobs/regression-check', { mode: 'light' })} disabled={jobRunning}>回帰チェック light</button>
+          <button className="secondary" onClick={() => startJob('/api/jobs/regression-check', { mode: 'full' })} disabled={jobRunning}>回帰チェック full</button>
+          <button className="ghost" onClick={() => startJob('/api/jobs/golden-freeze')} disabled={jobRunning}>Golden freeze</button>
+          <button className="ghost" onClick={refresh}>状態再読込</button>
+        </div>
+        <div className="detail-grid">
+          <div>
+            <small>mismatch</small>
+            <strong>{regression?.mismatch_count ?? '-'}</strong>
+          </div>
+          <div>
+            <small>missing</small>
+            <strong>{regression?.missing_in_actual_count ?? '-'}</strong>
+          </div>
+          <div>
+            <small>negative violation</small>
+            <strong>{regression?.negative_golden_violations ?? '-'}</strong>
+          </div>
+          <div>
+            <small>generated</small>
+            <strong>{regression?.generated_at_utc || '-'}</strong>
+          </div>
+        </div>
+      </div>
+      <CorroborationSummaryPanel job={job} onJob={onJob} onError={onError} jobRunning={jobRunning} refreshToken={refreshToken} />
+      <ReviewTerminal job={job} />
+    </section>
   );
 }
 

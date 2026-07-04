@@ -512,6 +512,11 @@ def regression_summary() -> Dict[str, Any]:
     return golden.read_regression_summary(PROJECT_ROOT)
 
 
+@app.get("/api/golden/summary")
+def golden_summary() -> Dict[str, Any]:
+    return golden.read_golden_summary(PROJECT_ROOT)
+
+
 def _start_job(name: str, target: Any) -> Dict[str, Any]:
     try:
         return jobs.start(name, target)

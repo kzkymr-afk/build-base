@@ -233,15 +233,29 @@ textarea {
   margin-top: 3px;
 }
 
-nav {
+.nav-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.nav-group {
   display: grid;
   gap: 6px;
 }
 
-nav button {
+.nav-group > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 0 12px;
+  text-transform: uppercase;
+}
+
+.nav-group button {
   background: transparent;
   border: 1px solid transparent;
-  color: #dbe3ea;
+  color: var(--muted-strong);
   min-height: 40px;
   padding: 0 12px;
   text-align: left;
@@ -249,14 +263,14 @@ nav button {
   font-weight: 700;
 }
 
-nav button.active {
+.nav-group button.active {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.13);
   color: #ffffff;
-  box-shadow: inset 3px 0 0 #f2bd5d;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
-nav button:hover:not(:disabled) {
+.nav-group button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   box-shadow: none;
   color: #ffffff;
@@ -673,6 +687,30 @@ h3 {
   font-size: 18px;
   line-height: 1.25;
   overflow-wrap: anywhere;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.metric-panel {
+  display: grid;
+  gap: 8px;
+  min-height: 112px;
+}
+
+.metric-panel small,
+.metric-panel span {
+  color: var(--muted);
+}
+
+.metric-panel strong {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
 }
 
 .field-admin-layout {
@@ -1853,14 +1891,25 @@ dd {
     height: 36px;
   }
 
-  nav {
+  .nav-groups {
     display: flex;
     gap: 8px;
     overflow-x: auto;
     padding-bottom: 2px;
   }
 
-  nav button {
+  .nav-group {
+    display: flex;
+    gap: 8px;
+  }
+
+  .nav-group > span {
+    align-self: center;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .nav-group button {
     flex: 0 0 auto;
     min-height: 36px;
     white-space: nowrap;
