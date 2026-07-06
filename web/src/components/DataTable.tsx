@@ -6,7 +6,7 @@ import {
   useReactTable
 } from '@tanstack/react-table';
 import { Empty } from './common';
-import { type Row } from '../types';
+import { type CellStatus, type Row } from '../types';
 
 export function DataTable({
   data,
@@ -22,6 +22,7 @@ export function DataTable({
   onRowSelectionToggle,
   compact = false,
   markEmptyCells = false,
+  cellStatuses,
   clampAllCells = false,
   renderCellValue,
   renderClampedText
@@ -39,6 +40,7 @@ export function DataTable({
   onRowSelectionToggle?: (row: Row) => void;
   compact?: boolean;
   markEmptyCells?: boolean;
+  cellStatuses?: Record<string, Record<string, CellStatus>>;
   clampAllCells?: boolean;
   renderCellValue: (column: string, value: unknown) => React.ReactNode;
   renderClampedText: (value: unknown, className?: string) => React.ReactNode;
@@ -50,6 +52,16 @@ export function DataTable({
       cell: (info) => {
         const rawValue = info.getValue();
         const value = String(rawValue ?? '');
+        const companyYearId = String(info.row.original.company_year_id || '');
+        const status = companyYearId ? cellStatuses?.[companyYearId]?.[column] : undefined;
+        if (status && !baseColumns.has(column)) {
+          return (
+            <span className="status-cell">
+              <span className={value.trim() === '' ? 'empty-cell' : 'numeric-value'}>{value.trim() === '' ? '空欄' : renderCellValue(column, rawValue)}</span>
+              <span className={`cell-status-dot status-${status.status}`} title={status.summary || status.status_label}>{status.status_label}</span>
+            </span>
+          );
+        }
         if (markEmptyCells && !baseColumns.has(column) && value.trim() === '') {
           return <span className="empty-cell">空欄</span>;
         }
@@ -86,7 +98,7 @@ export function DataTable({
       selectionColumn,
       ...valueColumns
     ];
-  }, [columns, columnLabels, markEmptyCells, baseColumns, clampAllCells, renderCellValue, renderClampedText, selectableRows, selectedRowKeys, getRowKey, onRowSelectionToggle]);
+  }, [columns, columnLabels, markEmptyCells, cellStatuses, baseColumns, clampAllCells, renderCellValue, renderClampedText, selectableRows, selectedRowKeys, getRowKey, onRowSelectionToggle]);
   const table = useReactTable({ data, columns: defs, getCoreRowModel: getCoreRowModel() });
   if (!data.length) return <Empty message="該当する行がありません。" />;
   return (

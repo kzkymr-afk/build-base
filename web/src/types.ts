@@ -11,6 +11,22 @@ export type Page<T extends Row = Row> = {
   review_category_labels?: Record<string, string>;
 };
 
+export type CellStatus = {
+  status: string;
+  status_label: string;
+  summary: string;
+  next_action: string;
+  review_saved: boolean;
+  applied_status: string;
+  candidate_count: number;
+  has_source_audit: boolean;
+  resolution: string;
+};
+
+export type WidePage<T extends Row = Row> = Page<T> & {
+  cell_statuses: Record<string, Record<string, CellStatus>>;
+};
+
 export type Job = {
   id: string;
   name: string;
@@ -241,6 +257,12 @@ export type CellDetail = {
   has_source_audit: boolean;
   has_review_candidate: boolean;
   failure_reason: string;
+  current: Row;
+  review_state: Row;
+  candidates: Row[];
+  mapping_state: Row;
+  similar_scope_counts: Record<string, { count: number; samples: Row[] }>;
+  actions_available: Record<string, boolean>;
   wide_row: Row;
   audit_rows: Row[];
   review_rows: Row[];
@@ -479,4 +501,10 @@ export type ChartRenderOptions = {
   height: number;
   exportMode: boolean;
   exportSettings: ExportSettings;
+  axisDomains?: {
+    left?: [number, number];
+    right?: [number, number];
+    x?: [number, number];
+    y?: [number, number];
+  };
 };

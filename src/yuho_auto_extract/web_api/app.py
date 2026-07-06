@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuho_auto_extract import __version__
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts, reconciliation
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, cells, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts, reconciliation
 from yuho_auto_extract.web_api.jobs import JobAlreadyRunning, JobManager
 
 
@@ -45,6 +45,33 @@ class ReviewSaveRequest(BaseModel):
 
 class ReviewDeleteRequest(BaseModel):
     reviews: List[Dict[str, Any]]
+
+
+class CellReviewRequest(BaseModel):
+    review_decision: str
+    corrected_value: Any = ""
+    reviewer_note: str = ""
+    reviewer: str = "web_cell_workbench"
+
+
+class CellFieldNameRequest(BaseModel):
+    field_name_ja: str
+
+
+class CellMappingRequest(BaseModel):
+    mapping_id: str
+    decision: str
+    reviewer: str = "web_cell_workbench"
+    note: str = ""
+
+
+class CellApplySimilarRequest(BaseModel):
+    scope: str = "cell_only"
+    review_decision: str
+    corrected_value: Any = ""
+    reviewer_note: str = ""
+    reviewer: str = "web_cell_workbench"
+    preview: bool = True
 
 
 class NotApplicableRequest(BaseModel):
@@ -441,6 +468,70 @@ def resolved_reviews() -> Dict[str, Any]:
 def save_resolved_reviews(request: ReviewSaveRequest) -> Dict[str, Any]:
     try:
         return reviews.upsert_resolved_reviews(PROJECT_ROOT, request.reviews)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cells/{company_year_id}/{field_id}/review")
+def save_cell_review(company_year_id: str, field_id: str, request: CellReviewRequest) -> Dict[str, Any]:
+    try:
+        return cells.save_cell_review(
+            PROJECT_ROOT,
+            company_year_id,
+            field_id,
+            review_decision=request.review_decision,
+            corrected_value=request.corrected_value,
+            reviewer_note=request.reviewer_note,
+            reviewer=request.reviewer,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cells/{company_year_id}/{field_id}/field-name")
+def update_cell_field_name(company_year_id: str, field_id: str, request: CellFieldNameRequest) -> Dict[str, Any]:
+    try:
+        result = cells.update_cell_field_name(PROJECT_ROOT, field_id, request.field_name_ja)
+        result["company_year_id"] = company_year_id
+        result["field_id"] = field_id
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cells/{company_year_id}/{field_id}/mapping")
+def decide_cell_mapping(company_year_id: str, field_id: str, request: CellMappingRequest) -> Dict[str, Any]:
+    try:
+        result = cells.decide_cell_mapping(
+            PROJECT_ROOT,
+            request.mapping_id,
+            request.decision,
+            reviewer=request.reviewer,
+            note=request.note,
+        )
+        result["company_year_id"] = company_year_id
+        result["field_id"] = field_id
+        if not result.get("updated"):
+            raise HTTPException(status_code=409, detail=f"mapping {request.mapping_id} is not in 'proposed' status or not found")
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cells/{company_year_id}/{field_id}/apply-similar")
+def apply_similar_cell_reviews(company_year_id: str, field_id: str, request: CellApplySimilarRequest) -> Dict[str, Any]:
+    try:
+        return cells.apply_similar_reviews(
+            PROJECT_ROOT,
+            company_year_id,
+            field_id,
+            scope=request.scope,
+            review_decision=request.review_decision,
+            corrected_value=request.corrected_value,
+            reviewer_note=request.reviewer_note,
+            reviewer=request.reviewer,
+            preview=request.preview,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

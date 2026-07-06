@@ -78,7 +78,8 @@ import {
   type SourceSummary,
   type Status,
   type StockMonthlyStatus,
-  type StockOptions
+  type StockOptions,
+  type WidePage
 } from './types';
 import './styles.css';
 
@@ -545,6 +546,8 @@ function App() {
         {tab === 'results' && (
           <ResultsPanel
             refreshToken={dataRefreshToken}
+            job={job}
+            onJob={setJob}
             onAudit={(target) => { setAuditTarget(target); setTab('audit'); }}
             onReview={(target) => { setReviewTarget(target); setTab('review'); }}
           />
@@ -1109,10 +1112,14 @@ function ReviewTerminal({ job }: { job: Job | null }) {
 
 function ResultsPanel({
   refreshToken,
+  job,
+  onJob,
   onAudit,
   onReview
 }: {
   refreshToken: number;
+  job: Job | null;
+  onJob: (job: Job) => void;
   onAudit: (target: { company_year_id: string; field_id: string }) => void;
   onReview: (target: ReviewTarget) => void;
 }) {
@@ -1121,7 +1128,8 @@ function ResultsPanel({
   const [year, setYear] = React.useState('');
   const [periodType, setPeriodType] = React.useState('annual');
   const [preset, setPreset] = React.useState('all');
-  const [data, setData] = React.useState<Page | null>(null);
+  const [data, setData] = React.useState<WidePage | null>(null);
+  const [dataReloadToken, setDataReloadToken] = React.useState(0);
   const [error, setError] = React.useState('');
   const [cellDetail, setCellDetail] = React.useState<CellDetail | null>(null);
   const [cellLoading, setCellLoading] = React.useState(false);
@@ -1143,8 +1151,8 @@ function ResultsPanel({
   React.useEffect(() => {
     if (!options) return;
     const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, period_type: periodType, fields: selectedFields });
-    api<Page>(`/api/datasets/wide?${params}`).then(setData).catch((err) => setError(String(err)));
-  }, [options, page, company, year, periodType, selectedFields, refreshToken]);
+    api<WidePage>(`/api/datasets/wide?${params}`).then(setData).catch((err) => setError(String(err)));
+  }, [options, page, company, year, periodType, selectedFields, refreshToken, dataReloadToken]);
 
   function resetPage(next: () => void) {
     setPage(1);
@@ -1153,11 +1161,8 @@ function ResultsPanel({
     next();
   }
 
-  async function openCellDetail(row: Row, column: string) {
-    if (baseColumns.has(column)) return;
-    const companyYearId = String(row.company_year_id || '');
-    if (!companyYearId) return;
-    const params = new URLSearchParams({ company_year_id: companyYearId, field_id: column });
+  async function loadCellDetail(companyYearId: string, fieldId: string) {
+    const params = new URLSearchParams({ company_year_id: companyYearId, field_id: fieldId });
     setCellLoading(true);
     setCellError('');
     try {
@@ -1167,6 +1172,20 @@ function ResultsPanel({
       setCellError(String(err));
     } finally {
       setCellLoading(false);
+    }
+  }
+
+  async function openCellDetail(row: Row, column: string) {
+    if (baseColumns.has(column)) return;
+    const companyYearId = String(row.company_year_id || '');
+    if (!companyYearId) return;
+    await loadCellDetail(companyYearId, column);
+  }
+
+  function refreshCellWorkbench() {
+    setDataReloadToken((value) => value + 1);
+    if (cellDetail) {
+      void loadCellDetail(cellDetail.company_year_id, cellDetail.field_id);
     }
   }
 
@@ -1217,6 +1236,9 @@ function ResultsPanel({
         error={cellError}
         onAudit={onAudit}
         onReview={onReview}
+        job={job}
+        onJob={onJob}
+        onChanged={refreshCellWorkbench}
       />
       {data ? (
         <>
@@ -1225,6 +1247,7 @@ function ResultsPanel({
             columns={data.columns.filter((column) => !resultHiddenColumns.has(column))}
             columnLabels={fieldLabels}
             markEmptyCells
+            cellStatuses={data.cell_statuses}
             compact
             onCellClick={openCellDetail}
           />
@@ -1702,14 +1725,45 @@ function CellDetailPanel({
   loading,
   error,
   onAudit,
-  onReview
+  onReview,
+  job,
+  onJob,
+  onChanged
 }: {
   detail: CellDetail | null;
   loading: boolean;
   error: string;
   onAudit: (target: { company_year_id: string; field_id: string }) => void;
   onReview: (target: ReviewTarget) => void;
+  job: Job | null;
+  onJob: (job: Job) => void;
+  onChanged: () => void;
 }) {
+  const [decision, setDecision] = React.useState('correct');
+  const [correctedValue, setCorrectedValue] = React.useState('');
+  const [note, setNote] = React.useState('');
+  const [fieldNameDraft, setFieldNameDraft] = React.useState('');
+  const [similarScope, setSimilarScope] = React.useState('cell_only');
+  const [similarPreview, setSimilarPreview] = React.useState<Row[] | null>(null);
+  const [similarCount, setSimilarCount] = React.useState(0);
+  const [busy, setBusy] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [panelError, setPanelError] = React.useState('');
+
+  React.useEffect(() => {
+    if (!detail) return;
+    const candidateValue = String(detail.candidates?.[0]?.value || detail.review_rows?.[0]?.extracted_value || detail.current_value || '');
+    setDecision(candidateValue ? 'accept' : 'correct');
+    setCorrectedValue(candidateValue);
+    setNote(String(detail.review_state?.reviewer_note || ''));
+    setFieldNameDraft(detail.field_name_ja);
+    setSimilarScope('cell_only');
+    setSimilarPreview(null);
+    setSimilarCount(0);
+    setMessage('');
+    setPanelError('');
+  }, [detail?.company_year_id, detail?.field_id]);
+
   if (loading) {
     return <div className="panel cell-detail"><p className="muted">セル詳細を読み込み中です。</p></div>;
   }
@@ -1727,12 +1781,154 @@ function CellDetailPanel({
   const factRows = chain?.fact_resolution && Object.keys(chain.fact_resolution).length ? [chain.fact_resolution] : [];
   const canOpenReview = detail.review_rows.length > 0 || detail.resolved_rows.length > 0;
   const displayValue = detail.is_blank ? '空欄' : detail.current_value;
+  const jobRunning = job?.status === 'running';
+  const reviewState = detail.review_state || {};
+  const mappingRows = (detail.mapping_state?.mappings as Row[] | undefined) || [];
+  const proposedMappings = mappingRows.filter((row) => String(row.status || '') === 'proposed');
+
+  async function saveReview(nextDecision = decision, nextValue = correctedValue) {
+    if (!detail) return;
+    if (jobRunning) {
+      setPanelError('ジョブ実行中です。完了後に保存してください。');
+      return;
+    }
+    if (nextDecision === 'correct' && !String(nextValue).trim()) {
+      setPanelError('correct で保存するには修正値を入力してください。');
+      return;
+    }
+    if (nextDecision === 'accept' && !detail.candidates.some((candidate) => String(candidate.value || '').trim())) {
+      setPanelError('accept で保存するには候補値が必要です。手入力の場合は correct を選んでください。');
+      return;
+    }
+    setBusy('review');
+    setPanelError('');
+    try {
+      const result = await api<{ changed: number; total: number }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          review_decision: nextDecision,
+          corrected_value: nextDecision === 'correct' ? nextValue : '',
+          reviewer_note: note,
+          reviewer: 'web_cell_workbench'
+        })
+      });
+      setMessage(`セルレビューを保存しました: ${result.changed}件 / resolved合計 ${result.total}件。最終表へ出すにはレビュー反映が必要です。`);
+      onChanged();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function saveFieldName() {
+    if (!detail) return;
+    const nextName = fieldNameDraft.trim();
+    if (!nextName || nextName === detail.field_name_ja) return;
+    setBusy('field-name');
+    setPanelError('');
+    try {
+      await api(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/field-name`, {
+        method: 'POST',
+        body: JSON.stringify({ field_name_ja: nextName })
+      });
+      setMessage(`項目名を更新しました: ${detail.field_id} → ${nextName}`);
+      onChanged();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function applyReviewJob() {
+    if (jobRunning) return;
+    setBusy('apply-review');
+    setPanelError('');
+    try {
+      const next = await api<Job>('/api/jobs/apply-review', { method: 'POST' });
+      onJob(next);
+      setMessage('保存済みレビューを最終データへ反映するジョブを開始しました。');
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function decideMapping(mappingId: string, nextDecision: 'confirm' | 'reject') {
+    if (!detail) return;
+    setBusy(mappingId);
+    setPanelError('');
+    try {
+      await api(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/mapping`, {
+        method: 'POST',
+        body: JSON.stringify({ mapping_id: mappingId, decision: nextDecision, reviewer: 'web_cell_workbench' })
+      });
+      setMessage(nextDecision === 'confirm' ? 'マッピング提案を承認しました。' : 'マッピング提案を却下しました。');
+      onChanged();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function previewSimilar() {
+    if (!detail) return;
+    setBusy('similar-preview');
+    setPanelError('');
+    try {
+      const result = await api<{ target_count: number; targets: Row[] }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/apply-similar`, {
+        method: 'POST',
+        body: JSON.stringify({
+          scope: similarScope,
+          review_decision: decision,
+          corrected_value: correctedValue,
+          reviewer_note: note,
+          preview: true
+        })
+      });
+      setSimilarCount(result.target_count);
+      setSimilarPreview(result.targets);
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function applySimilar() {
+    if (!detail || !similarPreview) return;
+    const ok = window.confirm(`${similarCount}セルへ同じレビュー判断を保存します。最終表への反映は別途レビュー反映が必要です。実行しますか？`);
+    if (!ok) return;
+    setBusy('similar-apply');
+    setPanelError('');
+    try {
+      const result = await api<{ changed: number; target_count: number }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/apply-similar`, {
+        method: 'POST',
+        body: JSON.stringify({
+          scope: similarScope,
+          review_decision: decision,
+          corrected_value: correctedValue,
+          reviewer_note: note,
+          preview: false
+        })
+      });
+      setMessage(`同種セルへ保存しました: ${result.changed}件 / 対象 ${result.target_count}セル。`);
+      onChanged();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
 
   return (
-    <div className="panel cell-detail">
+    <div className="panel cell-detail cell-workbench">
       <div className="panel-head">
         <div>
-          <h2>{detail.field_name_ja}</h2>
+          <h2>Cell Workbench: {detail.field_name_ja}</h2>
           <p className="muted">{detail.company_year_id} / {detail.field_id}</p>
         </div>
         <span className={`badge status-${detail.status}`}>{detail.status_label}</span>
@@ -1740,8 +1936,16 @@ function CellDetailPanel({
 
       <div className="detail-grid">
         <div>
-          <small>現在値</small>
+          <small>最終表の現在値</small>
           <strong className={detail.is_blank ? 'blank-value' : ''}>{displayValue}</strong>
+        </div>
+        <div>
+          <small>保存状態</small>
+          <strong>{reviewState.saved ? `保存済み ${String(reviewState.reviewed_at || '')}` : '未保存'}</strong>
+        </div>
+        <div>
+          <small>反映状態</small>
+          <strong>{appliedStatusLabel(reviewState.applied_status)}{reviewState.applied_value ? `: ${String(reviewState.applied_value)}` : ''}</strong>
         </div>
         <div>
           <small>単位</small>
@@ -1765,6 +1969,116 @@ function CellDetailPanel({
         <h3>次の操作</h3>
         <p>{detail.next_action}</p>
       </div>
+      {message && <div className="inline-success">{message}</div>}
+      {panelError && <InlineError message={panelError} />}
+
+      <div className="workbench-grid">
+        <div className="workbench-card">
+          <h3>セル値を保存</h3>
+          <label>判定</label>
+          <select value={decision} onChange={(e) => setDecision(e.target.value)}>
+            <option value="accept">候補値を採用</option>
+            <option value="correct">手入力で修正</option>
+            <option value="reject">候補を却下</option>
+            <option value="not_applicable">このセルは対象外</option>
+          </select>
+          <label>修正値</label>
+          <input value={correctedValue} onChange={(e) => setCorrectedValue(e.target.value)} disabled={decision !== 'correct'} />
+          <label>メモ</label>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
+          <div className="toolbar">
+            <button type="button" onClick={() => saveReview()} disabled={busy === 'review' || jobRunning}>
+              {busy === 'review' ? '保存中...' : '保存'}
+            </button>
+            <button type="button" className="secondary" onClick={applyReviewJob} disabled={busy === 'apply-review' || jobRunning || !reviewState.saved}>
+              {busy === 'apply-review' ? '起動中...' : '最終表へ反映'}
+            </button>
+          </div>
+          <p className="hint">保存は review_resolved.csv に残ります。最終表へ出すには反映ジョブが必要です。</p>
+        </div>
+
+        <div className="workbench-card">
+          <h3>候補から採用</h3>
+          {detail.candidates.length ? (
+            <div className="candidate-list">
+              {detail.candidates.slice(0, 4).map((candidate, index) => (
+                <button
+                  type="button"
+                  className="candidate-pick"
+                  key={`${candidate.candidate_id || index}`}
+                  onClick={() => {
+                    const value = String(candidate.value || '');
+                    setDecision('correct');
+                    setCorrectedValue(value);
+                    void saveReview('correct', value);
+                  }}
+                  disabled={busy === 'review' || jobRunning}
+                >
+                  <strong>{String(candidate.value || '-')}</strong>
+                  <span>{String(candidate.source || '')} / {String(candidate.reason || '')}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">候補値はありません。必要なら手入力で保存します。</p>
+          )}
+        </div>
+
+        <div className="workbench-card">
+          <h3>項目名を修正</h3>
+          <input value={fieldNameDraft} onChange={(e) => setFieldNameDraft(e.target.value)} />
+          <button type="button" className="secondary" onClick={saveFieldName} disabled={busy === 'field-name' || !fieldNameDraft.trim() || fieldNameDraft.trim() === detail.field_name_ja}>
+            {busy === 'field-name' ? '更新中...' : '項目名を更新'}
+          </button>
+          <p className="hint">値の判定ではなく、field_definition.csv と概念名の表示を直します。</p>
+        </div>
+
+        <div className="workbench-card">
+          <h3>同種セルへ適用</h3>
+          <select value={similarScope} onChange={(e) => { setSimilarScope(e.target.value); setSimilarPreview(null); }}>
+            <option value="cell_only">このセルのみ</option>
+            <option value="same_company_all_years">同じ会社の全年度</option>
+            <option value="same_field_all_companies">同じ項目の全社全年度</option>
+          </select>
+          <div className="toolbar">
+            <button type="button" className="secondary" onClick={previewSimilar} disabled={busy === 'similar-preview'}>
+              {busy === 'similar-preview' ? '確認中...' : '対象をプレビュー'}
+            </button>
+            <button type="button" onClick={applySimilar} disabled={!similarPreview || busy === 'similar-apply' || jobRunning}>
+              {busy === 'similar-apply' ? '適用中...' : 'プレビュー対象へ保存'}
+            </button>
+          </div>
+          {similarPreview && (
+            <div className="similar-preview">
+              <p className="muted">対象 {similarCount}セル。先頭 {similarPreview.length}件を表示。</p>
+              <MiniRows title="適用対象プレビュー" rows={similarPreview} columns={['company_year_id', 'fiscal_year', 'field_id', 'current_value']} emptyMessage="対象はありません。" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {proposedMappings.length > 0 && (
+        <div className="detail-section">
+          <h3>項目対応候補</h3>
+          <div className="mapping-action-list">
+            {proposedMappings.slice(0, 5).map((mapping) => {
+              const mappingId = String(mapping.mapping_id || '');
+              return (
+                <div className="mapping-action" key={mappingId}>
+                  <div>
+                    <strong>{String(mapping.action || '')} → {String(mapping.concept_id || '')}</strong>
+                    <span>{String(mapping.observed_item_id || '')} / confidence {String(mapping.confidence || '-')}</span>
+                  </div>
+                  <div className="toolbar">
+                    <button type="button" className="secondary" onClick={() => decideMapping(mappingId, 'confirm')} disabled={busy === mappingId}>承認</button>
+                    <button type="button" className="ghost" onClick={() => decideMapping(mappingId, 'reject')} disabled={busy === mappingId}>却下</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="toolbar">
         <button
           className="ghost"
@@ -3010,6 +3324,7 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const [showCorrelation, setShowCorrelation] = React.useState(false);
   const [scatterX, setScatterX] = React.useState('');
   const [scatterY, setScatterY] = React.useState('');
+  const [axisOverrides, setAxisOverrides] = React.useState<Record<string, string>>({});
   const [data, setData] = React.useState<ChartData | null>(null);
   const [error, setError] = React.useState('');
 
@@ -3099,15 +3414,30 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
   const selectedSeriesIndex = selectedSeries ? Math.max(0, series.findIndex((item) => item.key === selectedSeries.key)) : 0;
   const selectedSeriesStyle = selectedSeries ? seriesStyles[selectedSeries.key] || {} : {};
   const selectedSeriesRenderKind = getSeriesRenderKind(chartKind, selectedSeriesIndex, selectedSeriesStyle);
+  const activeAxisRanges: { left?: [number, number]; right?: [number, number]; x?: [number, number]; y?: [number, number] } = chartKind === 'scatter'
+    ? {
+        x: niceAxisRange(scatter.map((row) => numericValue(row.x)).filter((value): value is number => value != null), { includeZero: false }),
+        y: niceAxisRange(scatter.map((row) => numericValue(row.y)).filter((value): value is number => value != null), { includeZero: false }),
+      }
+    : chartAxisRanges({
+        kind: chartKind,
+        rows: mode === 'company' ? companyBars.rows : trend.rows,
+        series,
+        rightAxisFields: selectedRightAxisFields,
+        seriesStyles,
+      });
+  const axisDomains = axisDomainsFromOverrides(axisOverrides, activeAxisRanges);
   const previewRenderOptions: ChartRenderOptions = {
     height: 420,
     exportMode: false,
     exportSettings,
+    axisDomains,
   };
   const exportRenderOptions: ChartRenderOptions = {
     height: Math.max(260, exportSettings.height - 34),
     exportMode: true,
     exportSettings,
+    axisDomains,
   };
 
   function updateSelectedSeriesStyle(patch: SeriesStyle) {
@@ -3132,6 +3462,18 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
 
   function updateExportSettings(patch: Partial<ExportSettings>) {
     setExportSettings((current) => ({ ...current, ...patch }));
+  }
+
+  function updateAxisOverride(key: string, value: string) {
+    setAxisOverrides((current) => ({ ...current, [key]: value }));
+  }
+
+  function fillAxisOverridesFromAuto() {
+    setAxisOverrides(axisOverridesFromAuto(activeAxisRanges));
+  }
+
+  function clearAxisOverrides() {
+    setAxisOverrides({});
   }
 
   function applyExportPreset(presetId: ExportPresetId) {
@@ -3165,6 +3507,7 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
     setScatterX('');
     setScatterY('');
     setSelectedSeriesKey('');
+    setAxisOverrides({});
     setData(null);
   }
 
@@ -3445,6 +3788,57 @@ function ChartsPanel({ refreshToken }: { refreshToken: number }) {
                   <button type="button" className="ghost" onClick={resetSelectedSeriesStyle}>選択系列を初期化</button>
                 </div>
               )}
+            </div>
+          )}
+          {viewMode === 'chart' && hasRequiredSelections && (
+            <div className="chart-style-section axis-range-section">
+              <div className="choice-head">
+                <h3>縦軸レンジ</h3>
+                <button type="button" className="ghost" onClick={clearAxisOverrides}>自動に戻す</button>
+              </div>
+              <p className="hint">空欄ならデータから自動設定します。数値を入れるとその値で固定します。</p>
+              {chartKind === 'scatter' ? (
+                <>
+                  <AxisRangeInputs
+                    title="X軸"
+                    minKey="xMin"
+                    maxKey="xMax"
+                    range={activeAxisRanges.x}
+                    overrides={axisOverrides}
+                    onChange={updateAxisOverride}
+                  />
+                  <AxisRangeInputs
+                    title="Y軸"
+                    minKey="yMin"
+                    maxKey="yMax"
+                    range={activeAxisRanges.y}
+                    overrides={axisOverrides}
+                    onChange={updateAxisOverride}
+                  />
+                </>
+              ) : (
+                <>
+                  <AxisRangeInputs
+                    title="左軸"
+                    minKey="leftMin"
+                    maxKey="leftMax"
+                    range={activeAxisRanges.left}
+                    overrides={axisOverrides}
+                    onChange={updateAxisOverride}
+                  />
+                  {selectedRightAxisFields.length > 0 && (
+                    <AxisRangeInputs
+                      title="右軸"
+                      minKey="rightMin"
+                      maxKey="rightMax"
+                      range={activeAxisRanges.right}
+                      overrides={axisOverrides}
+                      onChange={updateAxisOverride}
+                    />
+                  )}
+                </>
+              )}
+              <button type="button" className="secondary" onClick={fillAxisOverridesFromAuto}>自動値を入力して微調整</button>
             </div>
           )}
           {viewMode === 'chart' && (
@@ -3809,6 +4203,50 @@ function ChoiceGroup({
   );
 }
 
+function AxisRangeInputs({
+  title,
+  minKey,
+  maxKey,
+  range,
+  overrides,
+  onChange,
+}: {
+  title: string;
+  minKey: string;
+  maxKey: string;
+  range?: [number, number];
+  overrides: Record<string, string>;
+  onChange: (key: string, value: string) => void;
+}) {
+  const autoLabel = range ? `${formatAxisInput(range[0])} - ${formatAxisInput(range[1])}` : '自動値なし';
+  return (
+    <div className="axis-range-group">
+      <div className="axis-range-head">
+        <strong>{title}</strong>
+        <span>auto {autoLabel}</span>
+      </div>
+      <label className="filter-field">
+        <span>最小値</span>
+        <input
+          inputMode="decimal"
+          value={overrides[minKey] || ''}
+          placeholder={range ? formatAxisInput(range[0]) : 'auto'}
+          onChange={(event) => onChange(minKey, event.target.value)}
+        />
+      </label>
+      <label className="filter-field">
+        <span>最大値</span>
+        <input
+          inputMode="decimal"
+          value={overrides[maxKey] || ''}
+          placeholder={range ? formatAxisInput(range[1]) : 'auto'}
+          onChange={(event) => onChange(maxKey, event.target.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
 function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showValueLabels, seriesStyles, renderOptions }: {
   kind: Exclude<ChartKind, 'scatter'>;
   rows: Row[];
@@ -3845,6 +4283,7 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
           />
           <YAxis
             yAxisId="left"
+            domain={renderOptions.axisDomains?.left}
             axisLine={false}
             tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
@@ -3855,6 +4294,7 @@ function BarOrLineChartBlock({ kind, rows, xKey, series, rightAxisFields, showVa
             <YAxis
               yAxisId="right"
               orientation="right"
+              domain={renderOptions.axisDomains?.right}
               axisLine={false}
               tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
               tickFormatter={formatAxisTick}
@@ -4004,6 +4444,7 @@ function ScatterChartBlock({ rows, xLabel, yLabel, showCorrelation, renderOption
             type="number"
             dataKey="x"
             name={xLabel}
+            domain={renderOptions.axisDomains?.x}
             axisLine={{ stroke: design.axis }}
             tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
@@ -4014,6 +4455,7 @@ function ScatterChartBlock({ rows, xLabel, yLabel, showCorrelation, renderOption
             type="number"
             dataKey="y"
             name={yLabel}
+            domain={renderOptions.axisDomains?.y}
             axisLine={false}
             tick={{ fill: design.tick, fontSize: font.tick, fontWeight: 650 }}
             tickFormatter={formatAxisTick}
@@ -5030,6 +5472,133 @@ function getSeriesRenderKind(kind: ChartKind, index: number, style: SeriesStyle 
   if (kind === 'bar') return 'bar';
   if (kind === 'combo') return style.renderAs || (index === 0 ? 'bar' : 'line');
   return 'line';
+}
+
+function chartAxisRanges({
+  kind,
+  rows,
+  series,
+  rightAxisFields,
+  seriesStyles,
+}: {
+  kind: Exclude<ChartKind, 'scatter'>;
+  rows: Row[];
+  series: ChartSeries[];
+  rightAxisFields: string[];
+  seriesStyles: Record<string, SeriesStyle>;
+}): { left?: [number, number]; right?: [number, number] } {
+  const rightAxisSet = new Set(rightAxisFields);
+  const leftValues: number[] = [];
+  const rightValues: number[] = [];
+  let leftHasBar = kind === 'bar';
+  let rightHasBar = kind === 'bar';
+  for (const [index, item] of series.entries()) {
+    const target = rightAxisSet.has(item.fieldId) ? rightValues : leftValues;
+    const renderKind = getSeriesRenderKind(kind, index, seriesStyles[item.key] || {});
+    if (renderKind === 'bar') {
+      if (rightAxisSet.has(item.fieldId)) rightHasBar = true;
+      else leftHasBar = true;
+    }
+    for (const row of rows) {
+      const value = numericValue(row[item.key]);
+      if (value != null) target.push(value);
+    }
+  }
+  return {
+    left: niceAxisRange(leftValues, { includeZero: leftHasBar }),
+    right: niceAxisRange(rightValues, { includeZero: rightHasBar }),
+  };
+}
+
+function axisDomainsFromOverrides(
+  overrides: Record<string, string>,
+  autoRanges: { left?: [number, number]; right?: [number, number]; x?: [number, number]; y?: [number, number] },
+): { left?: [number, number]; right?: [number, number]; x?: [number, number]; y?: [number, number] } {
+  return {
+    left: axisDomain(overrides.leftMin, overrides.leftMax, autoRanges.left),
+    right: axisDomain(overrides.rightMin, overrides.rightMax, autoRanges.right),
+    x: axisDomain(overrides.xMin, overrides.xMax, autoRanges.x),
+    y: axisDomain(overrides.yMin, overrides.yMax, autoRanges.y),
+  };
+}
+
+function axisOverridesFromAuto(
+  autoRanges: { left?: [number, number]; right?: [number, number]; x?: [number, number]; y?: [number, number] },
+): Record<string, string> {
+  return {
+    leftMin: autoRanges.left ? formatAxisInput(autoRanges.left[0]) : '',
+    leftMax: autoRanges.left ? formatAxisInput(autoRanges.left[1]) : '',
+    rightMin: autoRanges.right ? formatAxisInput(autoRanges.right[0]) : '',
+    rightMax: autoRanges.right ? formatAxisInput(autoRanges.right[1]) : '',
+    xMin: autoRanges.x ? formatAxisInput(autoRanges.x[0]) : '',
+    xMax: autoRanges.x ? formatAxisInput(autoRanges.x[1]) : '',
+    yMin: autoRanges.y ? formatAxisInput(autoRanges.y[0]) : '',
+    yMax: autoRanges.y ? formatAxisInput(autoRanges.y[1]) : '',
+  };
+}
+
+function axisDomain(minText: string | undefined, maxText: string | undefined, autoRange?: [number, number]): [number, number] | undefined {
+  const manualMin = parseAxisNumber(minText);
+  const manualMax = parseAxisNumber(maxText);
+  const min = manualMin ?? autoRange?.[0];
+  const max = manualMax ?? autoRange?.[1];
+  if (min == null || max == null || min >= max) return autoRange;
+  return [min, max];
+}
+
+function parseAxisNumber(value: unknown): number | null {
+  const text = String(value ?? '').replace(/,/g, '').trim();
+  if (!text) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function niceAxisRange(values: number[], { includeZero }: { includeZero: boolean }): [number, number] | undefined {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (!finite.length) return undefined;
+  let min = Math.min(...finite);
+  let max = Math.max(...finite);
+  if (includeZero) {
+    if (min > 0) min = 0;
+    if (max < 0) max = 0;
+  }
+  if (min === max) {
+    const spread = Math.max(Math.abs(max) * 0.1, 1);
+    min -= spread;
+    max += spread;
+  }
+  const span = max - min;
+  const padding = span * 0.08;
+  return [niceFloor(min - padding), niceCeil(max + padding)];
+}
+
+function niceFloor(value: number): number {
+  const step = niceStep(value);
+  return Math.floor(value / step) * step;
+}
+
+function niceCeil(value: number): number {
+  const step = niceStep(value);
+  return Math.ceil(value / step) * step;
+}
+
+function niceStep(value: number): number {
+  const abs = Math.abs(value);
+  if (abs === 0) return 1;
+  const exponent = Math.floor(Math.log10(abs));
+  const base = 10 ** Math.max(exponent - 1, -6);
+  const scaled = abs / base;
+  if (scaled <= 20) return base;
+  if (scaled <= 50) return base * 2;
+  if (scaled <= 100) return base * 5;
+  return base * 10;
+}
+
+function formatAxisInput(value: number): string {
+  if (Math.abs(value) >= 1000) return String(Math.round(value));
+  if (Math.abs(value) >= 10) return Number(value.toFixed(1)).toString();
+  if (Math.abs(value) >= 1) return Number(value.toFixed(2)).toString();
+  return Number(value.toFixed(4)).toString();
 }
 
 function chartMargin(settings: ExportSettings, hasRightAxis: boolean) {

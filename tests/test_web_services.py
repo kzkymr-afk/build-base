@@ -7,7 +7,7 @@ from yuho_auto_extract.io_utils import read_table, write_table
 from yuho_auto_extract.review_queue import build_review_queue
 from yuho_auto_extract.services.ai_prompt import build_prompt
 from yuho_auto_extract.services.datasets import read_cell_detail, read_chart_data, read_options, read_review_queue, read_wide
-from yuho_auto_extract.services import pipeline, semantics_store
+from yuho_auto_extract.services import cells, pipeline, semantics_store
 from yuho_auto_extract.services.reviews import (
     delete_resolved_reviews,
     mark_company_field_not_applicable,
@@ -178,6 +178,49 @@ class WebServiceTests(unittest.TestCase):
             self.assertIn("construction_segment_profit_margin", presets["derived_ratios"]["fields"])
             self.assertEqual(presets["financial_position"]["name"], "財政状態")
 
+    def test_wide_results_include_cell_statuses_for_direct_review_workflow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": ""}],
+            )
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [{"company_year_id": "A_2024", "field_id": "roe", "field_name_ja": "ROE", "extracted_value": "8.2"}],
+            )
+
+            result = read_wide(root, fields=["roe"])
+
+            status = result["cell_statuses"]["A_2024"]["roe"]
+            self.assertEqual(status["status"], "blank_with_review_candidate")
+            self.assertEqual(status["candidate_count"], 1)
+            self.assertTrue(result["rows"][0]["roe"] == "")
+
+    def test_cell_detail_exposes_workbench_sections(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": ""}],
+            )
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [{"company_year_id": "A_2024", "field_id": "roe", "field_name_ja": "ROE", "extracted_value": "8.2", "review_reason": "confidence_below_threshold"}],
+            )
+
+            detail = read_cell_detail(root, "A_2024", "roe")
+
+            self.assertEqual(detail["current"]["status"], "blank_with_review_candidate")
+            self.assertEqual(detail["review_state"]["candidate_count"], 1)
+            self.assertEqual(detail["candidates"][0]["value"], "8.2")
+            self.assertIn("cell_only", detail["similar_scope_counts"])
+            self.assertTrue(detail["actions_available"]["manual_correct"])
+
     def test_cost_composition_ratio_does_not_treat_missing_components_as_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -251,6 +294,61 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(resolved[0]["review_decision"], "correct")
             self.assertEqual(resolved[0]["corrected_value"], "0.13")
             self.assertEqual(resolved[0]["reviewer_note"], "source quote checked")
+
+    def test_cell_review_saves_synthetic_resolved_row_when_queue_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": ""}],
+            )
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+
+            result = cells.save_cell_review(
+                root,
+                "A_2024",
+                "roe",
+                review_decision="correct",
+                corrected_value="8.2",
+                reviewer_note="filled from result table",
+            )
+
+            self.assertEqual(result["changed"], 1)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual(resolved[0]["company_year_id"], "A_2024")
+            self.assertEqual(resolved[0]["field_id"], "roe")
+            self.assertEqual(resolved[0]["field_name_ja"], "ROE")
+            self.assertEqual(resolved[0]["review_decision"], "correct")
+            self.assertEqual(resolved[0]["corrected_value"], "8.2")
+
+    def test_apply_similar_reviews_previews_before_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [
+                    {"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": ""},
+                    {"company_year_id": "A_2023", "operating_company_id": "A", "fiscal_year": "2023", "roe": ""},
+                    {"company_year_id": "B_2024", "operating_company_id": "B", "fiscal_year": "2024", "roe": ""},
+                ],
+            )
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+
+            preview = cells.apply_similar_reviews(
+                root,
+                "A_2024",
+                "roe",
+                scope="same_company_all_years",
+                review_decision="correct",
+                corrected_value="8.2",
+                preview=True,
+            )
+
+            self.assertTrue(preview["preview"])
+            self.assertEqual(preview["target_count"], 2)
+            self.assertFalse((root / "data" / "review" / "review_resolved.csv").exists())
 
     def test_review_upsert_overwrites_existing_resolved_review(self):
         with tempfile.TemporaryDirectory() as tmp:

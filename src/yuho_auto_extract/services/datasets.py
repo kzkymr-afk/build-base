@@ -220,7 +220,9 @@ def read_wide(
     filtered = [_with_derived_values(row, selected_fields) for row in filtered]
     keep = [column for column in BASE_WIDE_COLUMNS if column in _columns(filtered)] + selected_fields
     filtered = [{column: row.get(column, "") for column in keep} for row in filtered]
-    return paginate(filtered, page, page_size)
+    result = paginate(filtered, page, page_size)
+    result["cell_statuses"] = _cell_statuses_for_rows(root, result["rows"], selected_fields)
+    return result
 
 
 def read_chart_data(
@@ -449,6 +451,9 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         row_found=wide_row is not None,
     )
 
+    fact_resolution = _read_cell_resolution(root, company_year_id, field_id)
+    review_state = _review_state(current_value=current_value, review_rows=review_rows, resolved_rows=resolved_rows)
+    mappings = _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows)
     return {
         "company_year_id": company_year_id,
         "company_id": _company_id_from_year(company_year_id),
@@ -467,11 +472,201 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         "has_source_audit": bool(audit_rows),
         "has_review_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows),
         "failure_reason": failure_reason,
+        "current": {
+            "value": current_value,
+            "is_blank": _is_blank(current_value),
+            "status": status,
+            "status_label": status_label,
+        },
+        "review_state": review_state,
+        "candidates": _cell_candidates(review_rows, audit_rows),
+        "mapping_state": _mapping_state(mappings),
+        "similar_scope_counts": _similar_scope_counts(root, company_year_id, field_id),
+        "actions_available": _cell_actions_available(
+            current_value=current_value,
+            review_rows=review_rows,
+            resolved_rows=resolved_rows,
+            mappings=mappings,
+        ),
         "wide_row": wide_row or {},
         "audit_rows": audit_rows[:20],
         "review_rows": review_rows[:20],
         "resolved_rows": resolved_rows[:20],
-        "source_chain": _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows),
+        "source_chain": {**mappings, "fact_resolution": fact_resolution or mappings.get("fact_resolution", {})},
+    }
+
+
+def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_ids: Sequence[str]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    if not rows or not field_ids:
+        return {}
+    audit_keys = {
+        (str(row.get("company_year_id", "")), str(row.get("field_id", "")))
+        for row in read_table(root / "data" / "final" / "source_audit.csv")
+        if row.get("company_year_id") and row.get("field_id")
+    }
+    review_by_key: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    for row in read_table(root / "data" / "review" / "review_queue.csv"):
+        key = (str(row.get("company_year_id", "")), str(row.get("field_id", "")))
+        review_by_key.setdefault(key, []).append(row)
+    resolved_path = root / "data" / "review" / "review_resolved.csv"
+    resolved_by_key: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    for row in read_table(resolved_path) if resolved_path.exists() else []:
+        key = (str(row.get("company_year_id", "")), str(row.get("field_id", "")))
+        resolved_by_key.setdefault(key, []).append(row)
+    failures = _run_report_failures(root)
+    resolutions = _read_cell_resolutions(root)
+    out: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for row in rows:
+        company_year_id = str(row.get("company_year_id", ""))
+        if not company_year_id:
+            continue
+        out[company_year_id] = {}
+        for field_id in field_ids:
+            key = (company_year_id, field_id)
+            review_rows = review_by_key.get(key, [])
+            resolved_rows = resolved_by_key.get(key, [])
+            status, label, summary, next_action = _classify_cell(
+                value=row.get(field_id, ""),
+                has_audit=key in audit_keys,
+                review_rows=review_rows,
+                resolved_rows=resolved_rows,
+                failure_reason=failures.get(company_year_id, ""),
+                row_found=True,
+            )
+            resolution = str(resolutions.get(key, {}).get("resolution") or "")
+            if resolution in {"conflicted", "needs_review", "needs_reconciliation"} and status == "value_present":
+                status = f"corroboration_{resolution}"
+                label = "照合要確認" if resolution != "conflicted" else "照合conflict"
+            out[company_year_id][field_id] = {
+                "status": status,
+                "status_label": label,
+                "summary": summary,
+                "next_action": next_action,
+                "review_saved": bool(resolved_rows),
+                "applied_status": str(resolved_rows[0].get("applied_status", "")) if resolved_rows else "",
+                "candidate_count": len(review_rows),
+                "has_source_audit": key in audit_keys,
+                "resolution": resolution,
+            }
+    return out
+
+
+def _read_cell_resolutions(root: Path) -> Dict[tuple[str, str], Dict[str, Any]]:
+    if not semantics_store.semantics_db_path(root).exists():
+        return {}
+    conn = semantics_store.connect(root)
+    try:
+        return {
+            (str(row.get("company_year_id") or ""), str(row.get("concept_id") or "")): dict(row)
+            for row in semantics_store.fetch_cell_resolutions(conn).values()
+        }
+    finally:
+        conn.close()
+
+
+def _read_cell_resolution(root: Path, company_year_id: str, field_id: str) -> Dict[str, Any]:
+    row = _read_cell_resolutions(root).get((company_year_id, field_id), {})
+    return _decode_semantics_row(row) if row else {}
+
+
+def _review_state(*, current_value: str, review_rows: Sequence[Dict[str, Any]], resolved_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    saved = bool(resolved_rows)
+    latest = resolved_rows[0] if resolved_rows else {}
+    return {
+        "saved": saved,
+        "decision": str(latest.get("review_decision", "")),
+        "corrected_value": str(latest.get("corrected_value", "")),
+        "applied_status": str(latest.get("applied_status", "")),
+        "applied_value": str(latest.get("applied_value", "")),
+        "applied_at": str(latest.get("applied_at", "")),
+        "reviewed_at": str(latest.get("reviewed_at", "")),
+        "candidate_count": len(review_rows),
+        "saved_not_applied": saved and str(latest.get("applied_status", "")).strip().lower() not in {"applied", "rejected", "not_applicable"},
+        "final_value_present": not _is_blank(current_value),
+    }
+
+
+def _cell_candidates(review_rows: Sequence[Dict[str, Any]], audit_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for index, row in enumerate(review_rows[:20]):
+        candidates.append({
+            "candidate_id": f"review:{index}",
+            "source": "review_queue",
+            "value": row.get("extracted_value", ""),
+            "unit": row.get("unit_normalized", ""),
+            "reason": row.get("review_reason", ""),
+            "confidence": row.get("confidence", ""),
+            "source_quote": row.get("source_quote", ""),
+        })
+    for index, row in enumerate(audit_rows[:20]):
+        value = row.get("value", "")
+        if _is_blank(value):
+            continue
+        candidates.append({
+            "candidate_id": f"audit:{index}",
+            "source": "source_audit",
+            "value": value,
+            "unit": row.get("unit_normalized", ""),
+            "reason": row.get("validation_status", ""),
+            "confidence": row.get("confidence", ""),
+            "source_quote": row.get("source_quote", ""),
+        })
+    return candidates
+
+
+def _mapping_state(source_chain: Dict[str, Any]) -> Dict[str, Any]:
+    mappings = source_chain.get("mappings") or []
+    proposed = [row for row in mappings if str(row.get("status", "")) == "proposed"]
+    confirmed = [row for row in mappings if str(row.get("status", "")) == "confirmed"]
+    return {
+        "status": "has_proposals" if proposed else "confirmed" if confirmed else "none",
+        "proposed_count": len(proposed),
+        "confirmed_count": len(confirmed),
+        "mappings": mappings[:20],
+    }
+
+
+def _similar_scope_counts(root: Path, company_year_id: str, field_id: str) -> Dict[str, Any]:
+    rows = _attach_company_names(root, read_table(root / "data" / "final" / "final_master_wide.csv"))
+    company_id = _company_id_from_year(company_year_id)
+    same_company = [row for row in rows if str(row.get("operating_company_id", "")) == company_id and str(row.get("company_year_id", "")) != company_year_id]
+    same_field = [row for row in rows if str(row.get("company_year_id", "")) != company_year_id]
+    return {
+        "cell_only": {"count": 1, "samples": [{"company_year_id": company_year_id}]},
+        "same_company_all_years": {
+            "count": len(same_company) + 1,
+            "samples": _similar_samples([{**row, "field_id": field_id, "value": row.get(field_id, "")} for row in same_company[:5]]),
+        },
+        "same_field_all_companies": {
+            "count": len(same_field) + 1,
+            "samples": _similar_samples([{**row, "field_id": field_id, "value": row.get(field_id, "")} for row in same_field[:5]]),
+        },
+    }
+
+
+def _similar_samples(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "company_year_id": row.get("company_year_id", ""),
+            "company_name": row.get("operating_company_name", ""),
+            "fiscal_year": row.get("fiscal_year", ""),
+            "value": row.get("value", ""),
+        }
+        for row in rows
+    ]
+
+
+def _cell_actions_available(*, current_value: str, review_rows: Sequence[Dict[str, Any]], resolved_rows: Sequence[Dict[str, Any]], mappings: Dict[str, Any]) -> Dict[str, bool]:
+    mapping_state = _mapping_state(mappings)
+    return {
+        "accept_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows),
+        "manual_correct": True,
+        "reject_candidate": bool(review_rows or resolved_rows),
+        "not_applicable": True,
+        "field_name_update": True,
+        "mapping_decision": mapping_state["proposed_count"] > 0,
+        "apply_similar": True,
+        "apply_review_job_needed": bool(resolved_rows) and _is_blank(current_value),
     }
 
 
