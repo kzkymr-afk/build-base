@@ -193,6 +193,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated field_ids to run source inference for.",
     )
     p.set_defaults(handler=cmd_infer_sources_from_confirmed)
+    p = sub.add_parser("apply-source-inference")
+    p.add_argument(
+        "--fields",
+        default=",".join(["building_orders_total", "completed_building", "backlog_building_next"]),
+        help="Comma-separated field_ids to run source inference promotion for.",
+    )
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
+    p.add_argument("--apply", dest="dry_run", action="store_false")
+    p.set_defaults(handler=cmd_apply_source_inference)
     p = sub.add_parser("web")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", default=8765, type=int)
@@ -716,6 +725,35 @@ def cmd_infer_sources_from_confirmed(root: Path, args: argparse.Namespace) -> in
     print(f"known_cells_reproduction_rate={repro.get('rate', 0.0):.3f}")
     for status, count in sorted((report.get("summary") or {}).items()):
         print(f"missing_cells.{status}={count}")
+    return 0
+
+
+def cmd_apply_source_inference(root: Path, args: argparse.Namespace) -> int:
+    """BuildBase S1b: 出典逆引きの学習パターンを会社×fieldの複数年度成立ゲート付きで適用する。
+
+    既定は --dry-run（何も書き込まない）。--apply 明示時のみ
+    reviews.upsert_resolved_reviews 経由で review_resolved.csv に書き込み、
+    export-final 以降を再実行して final に反映する。
+    既存の値があるセル・既にレビュー確定済みのセルには一切書き込まない。
+    """
+    from .services import source_inference
+
+    field_ids = [field.strip() for field in str(args.fields).split(",") if field.strip()]
+    plan = source_inference.build_promotion_plan(root, field_ids)
+    result = source_inference.apply_promotion_plan(root, plan, dry_run=bool(args.dry_run))
+
+    print(f"dry_run={result.get('dry_run')}")
+    print(f"promote_candidates={len(plan.get('promote') or [])}")
+    print(f"candidate_single_year={len(plan.get('candidate_single_year') or [])}")
+    print(f"suspect_existing_values={len(plan.get('suspect_existing_values') or [])}")
+    print(f"planned={result.get('planned', 0)}")
+    print(f"skipped_existing_review={result.get('skipped_existing_review', 0)}")
+    print(f"applied={result.get('applied', 0)}")
+    if not result.get("dry_run"):
+        apply_review_result = result.get("apply_review") or {}
+        print(f"apply_review_ran={apply_review_result.get('ran')}")
+        if apply_review_result.get("ran"):
+            print(f"apply_review_exit_code={apply_review_result.get('exit_code')}")
     return 0
 
 

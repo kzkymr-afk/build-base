@@ -108,6 +108,10 @@ class RegressionCheckRequest(BaseModel):
     mode: str = "light"
 
 
+class SourceInferenceApplyRequest(BaseModel):
+    dry_run: bool = True
+
+
 class FactbookRefreshRequest(BaseModel):
     force: bool = False
     dry_run: bool = False
@@ -324,6 +328,16 @@ def start_regression_check(request: RegressionCheckRequest = Body(default=Regres
 @app.post("/api/jobs/apply-review")
 def start_apply_review() -> Dict[str, Any]:
     return _start_job("apply-review", pipeline.apply_review)
+
+
+@app.post("/api/jobs/source-inference-apply")
+def start_source_inference_apply(
+    request: SourceInferenceApplyRequest = Body(default=SourceInferenceApplyRequest()),
+) -> Dict[str, Any]:
+    return _start_job(
+        "source-inference-apply",
+        lambda root, log: pipeline.apply_source_inference(root, log=log, dry_run=request.dry_run),
+    )
 
 
 @app.get("/api/jobs/current")

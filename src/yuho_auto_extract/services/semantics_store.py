@@ -35,6 +35,7 @@ GOLDEN_NEGATIVE_CSV_NAME = "golden_negative.csv"
 OBSERVED_ITEMS_CSV_NAME = "observed_items.csv"
 CANONICAL_CONCEPTS_CSV_NAME = "canonical_concepts.csv"
 CONCEPT_MAPPINGS_CSV_NAME = "concept_mappings.csv"
+LEARNED_LABEL_PATTERNS_CSV_NAME = "learned_label_patterns.csv"
 
 # backup_semantics_db() が残すタイムスタンプ付きフルコピーの保持世代数。
 # backfill-semantics / freeze_golden のたびに ~42MB のバイナリコピーが増えるため、
@@ -259,6 +260,29 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "create index if not exists idx_concept_mappings_concept_status "
         "on concept_mappings (concept_id, status)"
+    )
+    # --- S1b: 学習パターン適用経路 ------------------------------------------
+    # learned_label_patterns: 出典逆引き(source_inference)が会社×fieldの行ラベル
+    # レイアウトから学習したパターン。status='candidate' は複数年度未成立
+    # （レポートに残すのみ）、'promoted' は自動promote済み（reviews経由で書込み済み）。
+    conn.execute(
+        """
+        create table if not exists learned_label_patterns (
+            pattern_id text primary key,
+            company_id text not null,
+            field_id text not null,
+            section_name text,
+            row_label_key text,
+            layout text,
+            evidence_json text,
+            status text not null default 'candidate',
+            created_at_utc text
+        )
+        """
+    )
+    conn.execute(
+        "create index if not exists idx_learned_label_patterns_company_field "
+        "on learned_label_patterns (company_id, field_id)"
     )
     conn.commit()
 
@@ -728,6 +752,67 @@ def fetch_concept_mappings(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return [dict(row) for row in conn.execute("select * from concept_mappings")]
 
 
+# ---------------------------------------------------------------------------
+# S1b: learned_label_patterns の upsert / fetch
+# ---------------------------------------------------------------------------
+
+def upsert_learned_label_patterns(
+    conn: sqlite3.Connection,
+    patterns: Iterable[Dict[str, Any]],
+) -> int:
+    """learned_label_patterns を upsert する（pattern_id で冪等）。完全置換はしない
+    （source_inferenceの実行毎に会社×fieldの一部だけを対象にすることがあるため、
+    他の会社・fieldのcandidate/promoted行を消してしまわないよう部分更新のみ行う）。
+    """
+    now = _now_utc_iso()
+    rows_written = 0
+    for pattern in patterns:
+        pattern_id = str(pattern.get("pattern_id") or "")
+        company_id = str(pattern.get("company_id") or "")
+        field_id = str(pattern.get("field_id") or "")
+        if not pattern_id or not company_id or not field_id:
+            continue
+        conn.execute(
+            """
+            insert into learned_label_patterns (
+                pattern_id, company_id, field_id, section_name, row_label_key,
+                layout, evidence_json, status, created_at_utc
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(pattern_id) do update set
+                company_id=excluded.company_id,
+                field_id=excluded.field_id,
+                section_name=excluded.section_name,
+                row_label_key=excluded.row_label_key,
+                layout=excluded.layout,
+                evidence_json=excluded.evidence_json,
+                status=excluded.status
+            """,
+            (
+                pattern_id,
+                company_id,
+                field_id,
+                str(pattern.get("section_name") or ""),
+                str(pattern.get("row_label_key") or ""),
+                str(pattern.get("layout") or ""),
+                json.dumps(pattern.get("evidence") or {}, ensure_ascii=False, sort_keys=True, default=str),
+                str(pattern.get("status") or "candidate"),
+                pattern.get("created_at_utc") or now,
+            ),
+        )
+        rows_written += 1
+    conn.commit()
+    return rows_written
+
+
+def fetch_learned_label_patterns(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
+    """pattern_id -> row dict のマップとして learned_label_patterns 全件を返す。"""
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in conn.execute("select * from learned_label_patterns"):
+        d = dict(row)
+        out[d["pattern_id"]] = d
+    return out
+
+
 def update_concept_mapping_status(
     conn: sqlite3.Connection,
     mapping_id: str,
@@ -918,6 +1003,9 @@ def write_csv_mirrors(root: Path, conn: sqlite3.Connection) -> Dict[str, Path]:
     concept_mapping_rows = [
         dict(row) for row in conn.execute("select * from concept_mappings order by mapping_id")
     ]
+    learned_label_pattern_rows = [
+        dict(row) for row in conn.execute("select * from learned_label_patterns order by pattern_id")
+    ]
 
     cell_path = semantics_dir / CELL_RESOLUTIONS_CSV_NAME
     corroboration_path = semantics_dir / CORROBORATIONS_CSV_NAME
@@ -926,6 +1014,7 @@ def write_csv_mirrors(root: Path, conn: sqlite3.Connection) -> Dict[str, Path]:
     observed_items_path = semantics_dir / OBSERVED_ITEMS_CSV_NAME
     canonical_concepts_path = semantics_dir / CANONICAL_CONCEPTS_CSV_NAME
     concept_mappings_path = semantics_dir / CONCEPT_MAPPINGS_CSV_NAME
+    learned_label_patterns_path = semantics_dir / LEARNED_LABEL_PATTERNS_CSV_NAME
     write_table(cell_path, cell_rows)
     write_table(corroboration_path, corroboration_rows)
     write_table(golden_path, golden_rows)
@@ -933,6 +1022,7 @@ def write_csv_mirrors(root: Path, conn: sqlite3.Connection) -> Dict[str, Path]:
     write_table(observed_items_path, observed_item_rows)
     write_table(canonical_concepts_path, canonical_concept_rows)
     write_table(concept_mappings_path, concept_mapping_rows)
+    write_table(learned_label_patterns_path, learned_label_pattern_rows)
     return {
         "cell_resolutions_csv": cell_path,
         "corroborations_csv": corroboration_path,
@@ -941,4 +1031,5 @@ def write_csv_mirrors(root: Path, conn: sqlite3.Connection) -> Dict[str, Path]:
         "observed_items_csv": observed_items_path,
         "canonical_concepts_csv": canonical_concepts_path,
         "concept_mappings_csv": concept_mappings_path,
+        "learned_label_patterns_csv": learned_label_patterns_path,
     }

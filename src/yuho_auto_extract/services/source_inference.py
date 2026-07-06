@@ -25,17 +25,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .. import local_table_extractor as lte
-from ..io_utils import ensure_parent, read_table
+from ..io_utils import ensure_parent, is_blankish, read_table
 from ..validator import check_backlog_equation_single
+from . import semantics_store
 from .mapping_promotion import open_edinet_db_readonly
 
 REPORTS_DIR = Path("data") / "reports"
@@ -642,6 +645,79 @@ def _company_year_ids_with_candidate_blocks(conn) -> List[str]:
     return [str(row["company_year_id"]) for row in rows if row["company_year_id"]]
 
 
+def _fit_all_for_company_year(conn, company_year_id: str) -> List[Tuple[Dict[str, Any], "FittedTuple", bool]]:
+    """company_year_idの全candidate_blocksを恒等式フィッティングし、
+    (block, fitted, is_consistent) のリストを返す（estimate_recovery/
+    build_promotion_planで共有する内部ヘルパー）。
+    """
+    blocks = _fetch_candidate_blocks(conn, company_year_id)
+    all_fitted: List[Tuple[Dict[str, Any], FittedTuple, bool]] = []
+    for block in blocks:
+        raw_text = str(block.get("raw_text") or "")
+        if not raw_text:
+            continue
+        segment = extract_table_segment(raw_text)
+        tokens = tokenize_numbers(segment)
+        label_positions = find_row_label_positions(segment)
+        fitted_tuples = fit_backlog_tuples(tokens, label_positions, text=segment)
+        consistency = _check_total_row_consistency(fitted_tuples)
+        for idx, fitted in enumerate(fitted_tuples):
+            all_fitted.append((block, fitted, consistency.get(idx, True)))
+    return all_fitted
+
+
+def _building_role_values_for_field(
+    all_fitted: Sequence[Tuple[Dict[str, Any], "FittedTuple", bool]],
+    field_id: str,
+) -> List[Dict[str, Any]]:
+    """all_fittedからbuilding行・当該年度のみを対象に、field_idのroleに対応する
+    値の候補一覧を返す（estimate_recovery/build_promotion_planで共有）。
+    """
+    role_offset = FIELD_ROLE_BY_ID.get(field_id)
+    if role_offset is None:
+        return []
+    has_current_period = any(fitted.period == "current" for _b, fitted, _c in all_fitted)
+    found_values: List[Dict[str, Any]] = []
+    for block, fitted, is_consistent in all_fitted:
+        if fitted.row_label_key != "building":
+            continue
+        if has_current_period and fitted.period == "previous":
+            continue
+        candidate_value = fitted.values[role_offset] if role_offset < len(fitted.values) else None
+        if candidate_value is None:
+            continue
+        found_values.append(
+            {
+                "value": candidate_value,
+                "candidate_block_id": block.get("candidate_block_id"),
+                "section_name": block.get("section_name"),
+                "has_total_column": fitted.has_total_column,
+                "row_equation_consistent": is_consistent,
+                "period": fitted.period,
+            }
+        )
+    return found_values
+
+
+def _classify_found_values(found_values: Sequence[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
+    """found_valuesを (status, details) に分類する（"high_confidence"/"low_confidence"/"not_found"）。
+
+    5個組（計列あり・恒等式整合）由来の値を最優先の証拠として扱う。4個組フォールバックは
+    計列を伴わない非標準表のみが対象のはずだが、実データでは同一表内の別セクションから
+    桁数の合わない断片（年号の一部等）を拾うことがあるため、5個組由来のユニーク値が
+    存在する場合はそれを採用し、4個組由来の値は無視する。
+    """
+    if not found_values:
+        return "not_found", []
+    high_conf = [v for v in found_values if v["has_total_column"] and v["row_equation_consistent"]]
+    if high_conf:
+        distinct_high_conf_values = {round(v["value"], 1) for v in high_conf}
+        if len(distinct_high_conf_values) == 1:
+            return "high_confidence", high_conf
+        return "low_confidence", found_values
+    return "low_confidence", found_values
+
+
 def estimate_recovery(root: Path, field_ids: Sequence[str] = DEFAULT_FIELD_IDS) -> Dict[str, Any]:
     """学習済みレイアウト＋恒等式フィットを欠落セル側に適用し、回復見込みを分類する。
 
@@ -821,3 +897,335 @@ def _dry_run_markdown(report: Dict[str, Any]) -> str:
     for company_id, counts in sorted((report.get("by_company") or {}).items()):
         lines.append(f"- {company_id}: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# S1b: 学習パターン適用経路（会社スコープ・検算ゲート）
+# ---------------------------------------------------------------------------
+#
+# 絶対制約（確定計画S1b節より）:
+#   1. 書き込み経路は reviews.upsert_resolved_reviews のみ。
+#   2. 既存の値があるセルには一切書かない（空白セルの充填のみ）。
+#      MATSUI_2018/TODA_2016等の誤値上書きもしない — レポートに出すのみ。
+#   3. 自動promote条件: high_confidence（恒等式ユニーク成立）かつ、当該会社で
+#      複数年度の恒等式が成立していること。単年度のみはcandidate止まり。
+#   4. promoteする行は reviewer='source_inference' を必ず設定する
+#      （golden.freeze_goldenがgated originに分類するための必須フック）。
+#   5. dry-run既定。本適用は apply_promotion_plan(..., dry_run=False) 明示時のみ。
+
+SUSPECT_VALIDATION_STATUSES = {"fail"}
+
+
+def _pattern_id(company_id: str, field_id: str, section_name: str, row_label_key: str) -> str:
+    raw = "|".join([company_id or "", field_id or "", section_name or "", row_label_key or ""])
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _company_id_from_company_year(company_year_id: str) -> str:
+    if "_" not in company_year_id:
+        return company_year_id
+    return company_year_id.rsplit("_", 1)[0]
+
+
+def build_promotion_plan(root: Path, field_ids: Sequence[str] = DEFAULT_FIELD_IDS) -> Dict[str, Any]:
+    """estimate_recoveryのhigh_confidenceセルから、会社ごとに複数年度成立を確認し、
+    promote対象・candidate止まり・疑わしい既存値を分類したプランを返す。
+
+    戻り値: {
+        "promote": [{"company_year_id", "field_id", "value", "unit", "evidence": {...}}, ...],
+        "candidate_single_year": [同上（promoteしない理由=単年度のみ）],
+        "suspect_existing_values": [
+            {"company_year_id", "field_id", "existing_value", "recovered_value",
+             "validation_status", "evidence": {...}}, ...
+        ],
+    }
+
+    「既存の値があるセル」（already_filled）には一切書き込まない（絶対制約2）。
+    ここでの suspect_existing_values は検出のみ・上書きしない。
+    """
+    final_rows = read_table(root / FINAL_MASTER_LONG_RELATIVE_PATH)
+    existing_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for row in final_rows:
+        field_id = str(row.get("field_id") or "")
+        if field_id not in field_ids:
+            continue
+        company_year_id = str(row.get("company_year_id") or "")
+        if not company_year_id:
+            continue
+        existing_by_key[(company_year_id, field_id)] = row
+
+    conn = open_edinet_db_readonly(root)
+    try:
+        company_year_ids = _company_year_ids_with_candidate_blocks(conn)
+        # まず各company_year x field を high_confidence/low_confidence/not_found/
+        # already_filled(既存値との整合状況込み)に分類する。
+        per_cell: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        for company_year_id in company_year_ids:
+            all_fitted = _fit_all_for_company_year(conn, company_year_id)
+            for field_id in field_ids:
+                found_values = _building_role_values_for_field(all_fitted, field_id)
+                status, details = _classify_found_values(found_values)
+                per_cell[(company_year_id, field_id)] = {"status": status, "details": details}
+    finally:
+        conn.close()
+
+    # 会社×fieldごとに、恒等式が成立(high_confidence)した年度数を数える
+    # （絶対制約3: 単年度のみの会社はcandidate止まり）。
+    high_conf_years_by_company_field: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+    for (company_year_id, field_id), info in per_cell.items():
+        if info["status"] == "high_confidence":
+            company_id = _company_id_from_company_year(company_year_id)
+            high_conf_years_by_company_field[(company_id, field_id)].append(company_year_id)
+
+    promote: List[Dict[str, Any]] = []
+    candidate_single_year: List[Dict[str, Any]] = []
+    suspect_existing_values: List[Dict[str, Any]] = []
+
+    for (company_year_id, field_id), info in sorted(per_cell.items()):
+        if info["status"] != "high_confidence":
+            continue
+        existing_row = existing_by_key.get((company_year_id, field_id))
+        details = info["details"]
+        recovered_value = details[0]["value"] if details else None
+        company_id = _company_id_from_company_year(company_year_id)
+        multi_year_ok = len(high_conf_years_by_company_field.get((company_id, field_id), [])) >= 2
+
+        if existing_row is not None:
+            # 絶対制約2: 既存値があるセルには一切書かない。ただし推定値と既存値が
+            # 乖離し、かつ既存値がvalidation失敗（疑わしい）場合はレポートに出す。
+            existing_value = existing_row.get("value_normalized") or existing_row.get("value")
+            if is_blankish(existing_value):
+                continue
+            try:
+                existing_value_f = float(existing_value)
+            except (TypeError, ValueError):
+                continue
+            validation_status = str(existing_row.get("validation_status") or "")
+            if validation_status in SUSPECT_VALIDATION_STATUSES and recovered_value is not None:
+                if not _within_tolerance(existing_value_f - recovered_value, recovered_value):
+                    suspect_existing_values.append(
+                        {
+                            "company_year_id": company_year_id,
+                            "field_id": field_id,
+                            "existing_value": existing_value_f,
+                            "recovered_value": recovered_value,
+                            "validation_status": validation_status,
+                            "multi_year_confirmed": multi_year_ok,
+                            "evidence": _evidence_from_details(details),
+                        }
+                    )
+            continue
+
+        if recovered_value is None:
+            continue
+        entry = {
+            "company_year_id": company_year_id,
+            "field_id": field_id,
+            "value": recovered_value,
+            "unit": "百万円",
+            "evidence": _evidence_from_details(details),
+        }
+        if multi_year_ok:
+            promote.append(entry)
+        else:
+            candidate_single_year.append(entry)
+
+    return {
+        "promote": promote,
+        "candidate_single_year": candidate_single_year,
+        "suspect_existing_values": suspect_existing_values,
+        "field_ids": list(field_ids),
+    }
+
+
+def _evidence_from_details(details: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    if not details:
+        return {}
+    top = details[0]
+    return {
+        "candidate_block_id": top.get("candidate_block_id"),
+        "section_name": top.get("section_name"),
+        "row_label_key": "building",
+        "has_total_column": top.get("has_total_column"),
+        "row_equation_consistent": top.get("row_equation_consistent"),
+        "period": top.get("period"),
+        "value": top.get("value"),
+        "n_corroborating_blocks": len(details),
+    }
+
+
+def _format_reviewer_note(field_id: str, evidence: Dict[str, Any]) -> str:
+    parts = [
+        f"source_inference: field={field_id}",
+        f"candidate_block_id={evidence.get('candidate_block_id')}",
+        f"section={evidence.get('section_name')}",
+        f"tuple5(role={evidence.get('row_label_key')})",
+        f"has_total_column={evidence.get('has_total_column')}",
+        f"equation_consistent={evidence.get('row_equation_consistent')}",
+        f"period={evidence.get('period')}",
+        f"n_corroborating_blocks={evidence.get('n_corroborating_blocks')}",
+    ]
+    return " | ".join(parts)
+
+
+def apply_promotion_plan(root: Path, plan: Dict[str, Any], dry_run: bool = True) -> Dict[str, Any]:
+    """build_promotion_planの結果を適用する。
+
+    dry_run=True（既定）の場合は何も書き込まず、適用予定件数のみ返す。
+    dry_run=False の場合:
+      - plan["promote"] の各行を reviews.upsert_resolved_reviews に
+        review_decision='correct', corrected_value=値, reviewer='source_inference',
+        reviewer_note=出典 で一括書込みする（絶対制約1: 書き込み経路はここのみ）。
+      - 既存レビュー行があるセル（review_queue.csvに無いセルも含め、既にreview_resolved.csv
+        に確定済みの行があるセル）はスキップする（上書き禁止）。
+      - learned_label_patterns に promoted として記録する。
+      - 書込み後、pipeline.apply_review 相当（export-final --reviewed
+        data/review/review_resolved.csv）を呼び final に反映する。
+    """
+    from . import cells as cells_service  # 遅延import: _synthetic_review_rowパターンを再利用
+    from . import reviews as reviews_service
+
+    to_promote = list(plan.get("promote") or [])
+    if dry_run:
+        return {
+            "dry_run": True,
+            "planned": len(to_promote),
+            "skipped_existing_review": 0,
+            "applied": 0,
+        }
+
+    resolved_path = root / "data" / "review" / "review_resolved.csv"
+    existing_resolved = read_table(resolved_path) if resolved_path.exists() else []
+    existing_review_keys = {
+        (str(row.get("company_year_id") or ""), str(row.get("field_id") or ""))
+        for row in existing_resolved
+    }
+
+    rows_to_write: List[Dict[str, Any]] = []
+    skipped_existing_review = 0
+    now = _now_utc_iso()
+    patterns_to_record: List[Dict[str, Any]] = []
+
+    for entry in to_promote:
+        key = (str(entry["company_year_id"]), str(entry["field_id"]))
+        if key in existing_review_keys:
+            # 上書き禁止（絶対制約2の一環: 既にレビュー確定済みのセルには書かない）。
+            skipped_existing_review += 1
+            continue
+        evidence = entry.get("evidence") or {}
+        base = cells_service._synthetic_review_row(root, key[0], key[1])
+        base.update(
+            {
+                "review_decision": "correct",
+                "corrected_value": entry["value"],
+                "reviewer_note": _format_reviewer_note(key[1], evidence),
+                "reviewer": "source_inference",
+                "reviewed_at": now,
+                "applied_status": "",
+                "applied_value": "",
+                "applied_at": "",
+            }
+        )
+        rows_to_write.append(base)
+
+        company_id = _company_id_from_company_year(key[0])
+        patterns_to_record.append(
+            {
+                "pattern_id": _pattern_id(company_id, key[1], str(evidence.get("section_name") or ""), "building"),
+                "company_id": company_id,
+                "field_id": key[1],
+                "section_name": evidence.get("section_name"),
+                "row_label_key": "building",
+                "layout": "tuple5" if evidence.get("has_total_column") else "tuple4",
+                "evidence": evidence,
+                "status": "promoted",
+                "created_at_utc": now,
+            }
+        )
+
+    write_result: Dict[str, Any] = {"changed": 0, "total": len(existing_resolved)}
+    if rows_to_write:
+        write_result = reviews_service.upsert_resolved_reviews(root, rows_to_write)
+
+    if patterns_to_record:
+        conn = semantics_store.connect(root)
+        try:
+            semantics_store.upsert_learned_label_patterns(conn, patterns_to_record)
+        finally:
+            conn.close()
+
+    _write_candidate_patterns(root, plan)
+    _write_suspect_existing_values_report(root, plan)
+
+    apply_result: Dict[str, Any] = {"ran": False}
+    if rows_to_write:
+        from . import pipeline as pipeline_service  # 遅延import: 循環import回避
+
+        exit_code = pipeline_service.apply_review(root, reviewed="data/review/review_resolved.csv")
+        apply_result = {"ran": True, "exit_code": exit_code}
+
+    return {
+        "dry_run": False,
+        "planned": len(to_promote),
+        "skipped_existing_review": skipped_existing_review,
+        "applied": len(rows_to_write),
+        "write_result": write_result,
+        "apply_review": apply_result,
+    }
+
+
+def _write_candidate_patterns(root: Path, plan: Dict[str, Any]) -> None:
+    """candidate_single_year（単年度のみ・promoteしない）をlearned_label_patternsに
+    status='candidate'として記録する（レポート・将来の複数年度成立確認用）。
+    """
+    candidates = plan.get("candidate_single_year") or []
+    if not candidates:
+        return
+    now = _now_utc_iso()
+    patterns_to_record: List[Dict[str, Any]] = []
+    for entry in candidates:
+        evidence = entry.get("evidence") or {}
+        company_id = _company_id_from_company_year(str(entry["company_year_id"]))
+        field_id = str(entry["field_id"])
+        patterns_to_record.append(
+            {
+                "pattern_id": _pattern_id(company_id, field_id, str(evidence.get("section_name") or ""), "building"),
+                "company_id": company_id,
+                "field_id": field_id,
+                "section_name": evidence.get("section_name"),
+                "row_label_key": "building",
+                "layout": "tuple5" if evidence.get("has_total_column") else "tuple4",
+                "evidence": evidence,
+                "status": "candidate",
+                "created_at_utc": now,
+            }
+        )
+    conn = semantics_store.connect(root)
+    try:
+        semantics_store.upsert_learned_label_patterns(conn, patterns_to_record)
+    finally:
+        conn.close()
+
+
+def _write_suspect_existing_values_report(root: Path, plan: Dict[str, Any]) -> Optional[Path]:
+    """疑わしい既存値レポートを data/reports/suspect_existing_values.md に書く（上書きはしない）。"""
+    suspects = plan.get("suspect_existing_values") or []
+    reports_dir = root / REPORTS_DIR
+    ensure_parent(reports_dir / "placeholder")
+    path = reports_dir / "suspect_existing_values.md"
+    lines = ["# 疑わしい既存値レポート（source_inference）", "", "既存の値は一切上書きしていません。人手でのレビューを推奨します。", ""]
+    if not suspects:
+        lines.append("該当なし。")
+    for item in suspects:
+        lines.append(
+            f"- {item['company_year_id']} / {item['field_id']}: "
+            f"existing={item['existing_value']} recovered={item['recovered_value']} "
+            f"validation_status={item['validation_status']} "
+            f"multi_year_confirmed={item.get('multi_year_confirmed')}"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path

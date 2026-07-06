@@ -34,6 +34,13 @@ GOLDEN_ORIGIN_HUMAN_ACCEPT = "human_accept"
 GOLDEN_ORIGIN_CORROBORATED_2PLUS = "corroborated_2plus"
 GOLDEN_ORIGIN_MANUAL_MASTER = "manual_master"
 GOLDEN_ORIGIN_NEGATIVE = "human_not_applicable"
+# S1b: reviewer列が'source_inference'の行は機械由来（恒等式フィッティングによる
+# 自動promote）であり、人間の判断ではない。human_correct/human_acceptに分類すると
+# 回帰網の保護(gated)から誤って外れてしまう（run_regressionのシャドウ再導出は
+# レビュー非適用のため、人間ロック値は原理的に非再現でinformational扱いになる仕様
+# だが、機械由来の値は本来再現可能でなければならず、regressionのゲート対象に
+# 含めるべき）。そのためreviewer=='source_inference'は専用originに分類する。
+GOLDEN_ORIGIN_SOURCE_INFERENCE = "source_inference"
 
 REGRESSION_MODE_LIGHT = "light"
 REGRESSION_MODE_FULL = "full"
@@ -125,12 +132,19 @@ def freeze_golden(root: Path) -> Dict[str, Any]:
             applied_value = row.get("applied_value")
             if is_blankish(applied_value):
                 continue
-            origin = GOLDEN_ORIGIN_HUMAN_CORRECT if decision == "correct" else GOLDEN_ORIGIN_HUMAN_ACCEPT
+            if str(row.get("reviewer") or "") == "source_inference":
+                # 機械由来（恒等式フィッティングで確定した値）: 人間ロックにはせず、
+                # 回帰網の保護(gated)対象になるoriginを別枠で付与する。
+                origin = GOLDEN_ORIGIN_SOURCE_INFERENCE
+                locked = False
+            else:
+                origin = GOLDEN_ORIGIN_HUMAN_CORRECT if decision == "correct" else GOLDEN_ORIGIN_HUMAN_ACCEPT
+                locked = True
             try:
                 value = float(applied_value)
             except (TypeError, ValueError):
                 continue
-            golden[key] = {"value": value, "origin": origin, "locked": True}
+            golden[key] = {"value": value, "origin": origin, "locked": locked}
 
     semantics_store.backup_semantics_db(root)
     conn = semantics_store.connect(root)
@@ -418,7 +432,9 @@ def _read_shadow_final_long(shadow_root: Path) -> Dict[Tuple[str, str], Any]:
 # human_correct / human_accept は「素のパイプラインが誤るからこそ人間が是正/採用した」
 # ロックされた上書き値であり、レビュー非適用のシャドウ再導出では原理的に再現不能。
 # よってpass/failゲートには含めず、informationalとして別集計する。
-_GATED_GOLDEN_ORIGINS = frozenset({GOLDEN_ORIGIN_CORROBORATED_2PLUS, GOLDEN_ORIGIN_MANUAL_MASTER})
+_GATED_GOLDEN_ORIGINS = frozenset(
+    {GOLDEN_ORIGIN_CORROBORATED_2PLUS, GOLDEN_ORIGIN_MANUAL_MASTER, GOLDEN_ORIGIN_SOURCE_INFERENCE}
+)
 
 
 def _diff(

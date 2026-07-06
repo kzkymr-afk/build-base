@@ -347,6 +347,28 @@ def infer_sources_from_confirmed(
     )
 
 
+def apply_source_inference(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    fields: Optional[list[str]] = None,
+    dry_run: bool = True,
+) -> int:
+    """S1b: 出典逆引きの学習パターン適用（既定dry_run）。
+
+    dry_run=Falseの場合のみ reviews.upsert_resolved_reviews 経由で
+    review_resolved.csv に書き込み、export-final以降を再実行してfinalに反映する。
+    既存値・既存レビュー確定済みセルには一切書き込まない（絶対制約）。"""
+    _prepare(root)
+    field_ids = fields or ["building_orders_total", "completed_building", "backlog_building_next"]
+    return _call(
+        "apply-source-inference",
+        cli.cmd_apply_source_inference,
+        root,
+        argparse.Namespace(fields=",".join(field_ids), dry_run=dry_run),
+        log,
+    )
+
+
 def regression_check(root: Path, log: Optional[LogCallback] = None, mode: str = "light") -> int:
     """P3: 一時shadow_root上で再抽出し、凍結済みgoldenとdiffする。
     data/reports/regression_diff.csv・regression_summary.json を書く。
