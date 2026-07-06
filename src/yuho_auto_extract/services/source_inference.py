@@ -58,10 +58,12 @@ ROLE_LABELS = {0: "前期繰越", 1: "当期受注", 2: "計", 3: "当期完成"
 
 # 行ラベル語彙（建築/土木/計）。既存 SEGMENT_ORDER_LABELS のキー（xx事業/xx部門）に加え、
 # 表の実データで頻出する素の「建築工事」「土木工事」「建築」「土木」「計」「合計」も含める。
+# 大林組等、組版の都合で行ラベルの字間に空白/改行が挟まる（「建　築」「土　木」
+# 「合　計」）表記があるため、各文字の間に \s* を許容する。
 ROW_LABEL_PATTERNS: Dict[str, str] = {
-    "building": r"建築(?:事業|工事|部門)?",
-    "civil": r"土木(?:事業|工事|部門)?",
-    "total": r"(?:計|合計)",
+    "building": r"建\s*築(?:\s*(?:事業|工事|部門))?",
+    "civil": r"土\s*木(?:\s*(?:事業|工事|部門))?",
+    "total": r"(?:合\s*)?計",
 }
 
 _ALL_ROW_LABEL_RE = re.compile(
@@ -204,21 +206,76 @@ def find_row_label_positions(raw_text: str) -> List[Tuple[int, int, str, str]]:
 # 3. 恒等式フィッティング（一次手段）
 # ---------------------------------------------------------------------------
 
-_CURRENT_PERIOD_RE = re.compile(r"当事業年度|当連結会計年度|当期")
-_PREVIOUS_PERIOD_RE = re.compile(r"前事業年度|前連結会計年度|前期")
+_CURRENT_PERIOD_RE = re.compile(r"当事業年度|当連結会計年度")
+_PREVIOUS_PERIOD_RE = re.compile(r"前事業年度|前連結会計年度")
+# 単体の「前期」「当期」（事業年度接尾辞を伴わない短縮形）。列見出し
+# （前期繰越高/当期受注高等）との衝突があるため、_COLUMN_HEADER_RE に
+# 一致する区間は後段で除外してから使う。
+_CURRENT_PERIOD_SHORT_RE = re.compile(r"当期")
+_PREVIOUS_PERIOD_SHORT_RE = re.compile(r"前期")
+
+# 表の列見出しに現れる「前期○○」「当期○○」（○○=繰越/受注/完成/売上/施工）。
+# 見出し語のあいだに空白・改行・単位表記が挟まる組版（例:「当期\n受注\n工事高」）
+# にも対応するため、「前期/当期」の直後に0〜6文字の空白・改行を許容してから
+# 対象語が続くかを見る。マッチした「前期/当期」トークンは期区分マーカーの
+# 候補から除外する（列見出しは年度区分ではなく列の意味を表すラベルであり、
+# これを年度マーカーとして扱うと当年度・前年度の行がどちらも current 等の
+# 同一区分に誤判定され、恒等式フィットが複数に割れて low_confidence に
+# 落ちてしまう）。
+_COLUMN_HEADER_RE = re.compile(r"(?:前期|当期)[\s\n]{0,6}(?:繰越|受注|完成|売上|施工)")
+
+# 「第113期」等の期番号マーカー。事業年度表記が無い（前期/当期しか
+# 出てこない）業界標準表で、当該書類の年度を一意に特定する一次情報源。
+_NTH_PERIOD_RE = re.compile(r"第\s*(\d+)\s*期")
+
+
+def _column_header_spans(text: str) -> List[Tuple[int, int]]:
+    return [(match.start(), match.end()) for match in _COLUMN_HEADER_RE.finditer(text)]
+
+
+def _inside_spans(pos: int, spans: Sequence[Tuple[int, int]]) -> bool:
+    return any(start <= pos < end for start, end in spans)
 
 
 def _find_period_markers(text: str) -> List[Tuple[int, str]]:
-    """テキスト中の「当事業年度」「前事業年度」等の期区分マーカー出現位置を列挙する。
+    """テキスト中の期区分マーカー出現位置を列挙する。
 
-    既存 local_table_extractor._is_current_period_marker / _is_previous_period_marker
-    と同じ語彙を使うが、行単位ではなく文字位置ベースで判定する（raw_text が
-    改行構造を保っていない場合でも機能させるため）。
+    優先順位:
+      1. 「第N期」形式。2つ以上検出できた場合はこれを唯一の情報源として使う
+         （数値が最大のものを current、それ以外を previous とする）。これは
+         多くの業界標準「受注高、売上高及び繰越高」表で当事業年度/前事業年度
+         という表記が使われず「前期」「当期」という短縮語のみが列見出しとして
+         現れるケース（SHIMIZU/TAISEI/TAKENAKA/TOA/PENTA/NISHIMATSU/OBAYASHI等）
+         に対応するための一次マーカー。
+      2. 「当事業年度」「前事業年度」（連結含む）。
+      3. 単体の「前期」「当期」。ただし列見出し（前期繰越/当期受注等）に
+         含まれる出現は _COLUMN_HEADER_RE で検出して除外する。
+    第N期マーカーが2つ以上取れた場合は、行単位の位置合わせを崩さないよう
+    2.・3. のマーカーとマージせず単独で採用する（同じテキスト中で「前期/当期」
+    が列見出し以外の注記等に出現し、誤って別の区分を割り込ませることを防ぐ）。
     """
+    nth_matches = [(match.start(), int(match.group(1))) for match in _NTH_PERIOD_RE.finditer(text)]
+    if len(nth_matches) >= 2:
+        max_value = max(value for _pos, value in nth_matches)
+        markers = [
+            (pos, "current" if value == max_value else "previous") for pos, value in nth_matches
+        ]
+        markers.sort(key=lambda item: item[0])
+        return markers
+
+    header_spans = _column_header_spans(text)
     markers: List[Tuple[int, str]] = []
     for match in _CURRENT_PERIOD_RE.finditer(text):
         markers.append((match.start(), "current"))
     for match in _PREVIOUS_PERIOD_RE.finditer(text):
+        markers.append((match.start(), "previous"))
+    for match in _CURRENT_PERIOD_SHORT_RE.finditer(text):
+        if _inside_spans(match.start(), header_spans):
+            continue
+        markers.append((match.start(), "current"))
+    for match in _PREVIOUS_PERIOD_SHORT_RE.finditer(text):
+        if _inside_spans(match.start(), header_spans):
+            continue
         markers.append((match.start(), "previous"))
     markers.sort(key=lambda item: item[0])
     return markers

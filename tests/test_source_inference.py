@@ -149,6 +149,100 @@ class SyntheticTableTests(unittest.TestCase):
                 self.assertTrue(consistency.get(idx))
 
 
+class ColumnHeaderPeriodMarkerTests(unittest.TestCase):
+    """列見出しの「前期繰越高」「当期受注高」等が期区分マーカーとして
+    誤検出されないこと（修正1）。事業年度表記が無く「第N期」のみで
+    年度が区切られる業界標準表（SHIMIZU/TAISEI/TAKENAKA/TOA/PENTA/
+    NISHIMATSU型）を模した合成テキストで検証する。
+    """
+
+    TABLE_TEXT = (
+        "(1) 受注(契約)高，売上高，及び次期繰越高\n"
+        "期別\n種類別\n前期\n繰越高\n(百万円)\n当期\n受注(契約)高\n(百万円)\n計\n(百万円)\n"
+        "当期\n売上高\n(百万円)\n次期\n繰越高\n(百万円)\n"
+        "第113期\n"
+        "建築工事\n965,072\n1,040,785\n2,005,858\n1,047,270\n958,588\n"
+        "土木工事\n337,633\n380,585\n718,218\n254,386\n463,832\n"
+        "計\n1,302,705\n1,421,371\n2,724,077\n1,301,656\n1,422,420\n"
+        "第114期\n"
+        "建築工事\n958,588\n1,000,775\n1,959,363\n1,067,585\n891,777\n"
+        "土木工事\n463,832\n283,858\n747,691\n282,762\n464,928\n"
+        "計\n1,422,420\n1,284,633\n2,707,054\n1,350,347\n1,356,706\n"
+    )
+
+    def test_column_header_zenki_toki_are_excluded_from_period_markers(self):
+        # 列見出し中の「前期繰越」「当期受注」「当期売上」は期区分マーカーの
+        # 候補から除外され、"第N期" のみがマーカーとして採用されること。
+        markers = si._find_period_markers(self.TABLE_TEXT)
+        periods = {period for _pos, period in markers}
+        self.assertEqual(periods, {"current", "previous"})
+        # 列見出し区間（"前期\n繰越高" 等の出現位置）にマーカーが立っていないこと。
+        header_start = self.TABLE_TEXT.index("前期\n繰越高")
+        header_end = header_start + len("前期\n繰越高")
+        for pos, _period in markers:
+            self.assertFalse(header_start <= pos < header_end)
+
+    def test_building_row_period_is_correctly_split_by_nth_period(self):
+        # 第113期(前)・第114期(当)の建築行が、列見出しの「前期/当期」に
+        # 惑わされず正しく previous/current に分かれ、どちらも一意にフィットすること
+        # （誤検出時は両方が current 等の同一区分に落ち、low_confidence の原因になる）。
+        segment = si.extract_table_segment(self.TABLE_TEXT)
+        tokens = si.tokenize_numbers(segment)
+        labels = si.find_row_label_positions(segment)
+        fitted = si.fit_backlog_tuples(tokens, labels, text=segment)
+        building_current = [f for f in fitted if f.row_label_key == "building" and f.period == "current"]
+        building_previous = [f for f in fitted if f.row_label_key == "building" and f.period == "previous"]
+        self.assertEqual(len(building_current), 1)
+        self.assertEqual(len(building_previous), 1)
+        self.assertEqual(
+            building_current[0].values, (958588.0, 1000775.0, 1959363.0, 1067585.0, 891777.0)
+        )
+        self.assertEqual(
+            building_previous[0].values, (965072.0, 1040785.0, 2005858.0, 1047270.0, 958588.0)
+        )
+
+
+class SpacedRowLabelTests(unittest.TestCase):
+    """行ラベルの字間に空白/改行が挟まる組版（大林組型: 「建　築」「土　木」
+    「合　計」）でも行ラベル検出・恒等式フィットが成立すること（修正2）。
+    """
+
+    TABLE_TEXT = (
+        "(1）受注高、売上高及び繰越高\n"
+        "期 別 \n種類別 \n前期繰越高 \n(百万円) \n当期受注高 \n(百万円) \n計 \n(百万円) \n"
+        "当期売上高 \n(百万円) \n次期繰越高 \n(百万円) \n"
+        "第111期 \n"
+        "建設事業 \n"
+        "建 築 \n1,091,026 \n986,030 \n2,077,056 \n958,646 \n1,118,410 \n"
+        "土 木 \n372,237 \n322,227 \n694,464 \n267,923 \n426,540 \n"
+        "合 計 \n1,463,264 \n1,308,257 \n2,771,520 \n1,226,569 \n1,544,950 \n"
+        "第112期 \n"
+        "建設事業 \n"
+        "建 築 \n1,118,410 \n1,069,697 \n2,188,107 \n908,468 \n1,279,639 \n"
+        "土 木 \n426,540 \n330,584 \n757,124 \n297,907 \n459,217 \n"
+        "合 計 \n1,544,950 \n1,400,281 \n2,945,231 \n1,206,375 \n1,738,856 \n"
+    )
+
+    def test_spaced_labels_are_detected(self):
+        labels = si.find_row_label_positions(self.TABLE_TEXT)
+        keys = [label[2] for label in labels]
+        self.assertIn("building", keys)
+        self.assertIn("civil", keys)
+        self.assertIn("total", keys)
+
+    def test_spaced_building_row_fits_backlog_equation(self):
+        segment = si.extract_table_segment(self.TABLE_TEXT)
+        tokens = si.tokenize_numbers(segment)
+        labels = si.find_row_label_positions(segment)
+        fitted = si.fit_backlog_tuples(tokens, labels, text=segment)
+        building_current = [f for f in fitted if f.row_label_key == "building" and f.period == "current"]
+        self.assertEqual(len(building_current), 1)
+        self.assertTrue(building_current[0].has_total_column)
+        self.assertEqual(
+            building_current[0].values, (1118410.0, 1069697.0, 2188107.0, 908468.0, 1279639.0)
+        )
+
+
 @unittest.skipUnless(
     (_real_project_root() / "data" / "intermediate" / "edinet.db").exists(),
     "実プロジェクトの edinet.db が無い環境ではスキップ",
