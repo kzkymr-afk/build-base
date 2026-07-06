@@ -309,6 +309,28 @@ export type GoldenSummary = {
   latest_decided_at_utc?: string;
 };
 
+export type CoreCoverageCell = {
+  filled_years: number;
+  total_years: number;
+  blank_years: number[];
+  excluded_years: number[];
+  recoverable_years: number[];
+};
+
+export type CoreCoverageFieldSummary = {
+  filled: number;
+  total: number;
+  rate: number;
+  recoverable: number;
+};
+
+export type CoreCoverageResponse = {
+  fields: { field_id: string; field_name_ja: string }[];
+  companies: string[];
+  matrix: Record<string, Record<string, CoreCoverageCell>>;
+  summary: Record<string, CoreCoverageFieldSummary>;
+};
+
 export type CorroborationSummary = {
   status?: string;
   cells_total?: number;

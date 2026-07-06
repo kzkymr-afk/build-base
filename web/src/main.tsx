@@ -20,6 +20,8 @@ import {
 import { api } from './api';
 import { DataTable as BaseDataTable } from './components/DataTable';
 import { Empty, FilterBar, InlineError, MarkdownBlock, Pager } from './components/common';
+import { TermTooltip } from './components/TermTooltip';
+import { t } from './terminology';
 import {
   APP_VERSION_FALLBACK,
   COLLAPSED_TEXT_COLUMNS,
@@ -48,6 +50,8 @@ import {
   type CompanyOption,
   type ConceptListResult,
   type ConceptRow,
+  type CoreCoverageCell,
+  type CoreCoverageResponse,
   type CorroborationSummary,
   type DesignPreset,
   type ExportBackground,
@@ -441,6 +445,8 @@ function useFactbookOptions() {
   return { options, error, refresh };
 }
 
+type ResultsFilterTarget = { company: string; fiscal_year?: string };
+
 function App() {
   const [tab, setTab] = React.useState<(typeof tabs)[number][0]>('home');
   const [theme, setTheme] = React.useState<'dark' | 'light'>(() => {
@@ -453,6 +459,7 @@ function App() {
   const [error, setError] = React.useState('');
   const [auditTarget, setAuditTarget] = React.useState<{ company_year_id: string; field_id: string } | null>(null);
   const [reviewTarget, setReviewTarget] = React.useState<ReviewTarget | null>(null);
+  const [resultsFilterTarget, setResultsFilterTarget] = React.useState<ResultsFilterTarget | null>(null);
   const completedJobRef = React.useRef('');
 
   React.useEffect(() => {
@@ -541,7 +548,16 @@ function App() {
             <button onClick={() => setError('')}>閉じる</button>
           </div>
         )}
-        {tab === 'home' && <HomeDashboardPanel status={status} job={job} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
+        {tab === 'home' && (
+          <HomeDashboardPanel
+            status={status}
+            job={job}
+            onJob={setJob}
+            onError={setError}
+            refreshToken={dataRefreshToken}
+            onNavigateToResults={(target) => { setResultsFilterTarget(target); setTab('results'); }}
+          />
+        )}
         {tab === 'run' && <RunPanel job={job} onJob={setJob} onError={setError} onRefreshStatus={refreshStatus} status={status} />}
         {tab === 'results' && (
           <ResultsPanel
@@ -550,6 +566,7 @@ function App() {
             onJob={setJob}
             onAudit={(target) => { setAuditTarget(target); setTab('audit'); }}
             onReview={(target) => { setReviewTarget(target); setTab('review'); }}
+            initialFilter={resultsFilterTarget}
           />
         )}
         {tab === 'fields' && <FieldAdminPanel onUpdated={() => setDataRefreshToken((value) => value + 1)} />}
@@ -577,13 +594,15 @@ function HomeDashboardPanel({
   job,
   onJob,
   onError,
-  refreshToken
+  refreshToken,
+  onNavigateToResults
 }: {
   status: Status | null;
   job: Job | null;
   onJob: (job: Job) => void;
   onError: (message: string) => void;
   refreshToken: number;
+  onNavigateToResults: (target: ResultsFilterTarget) => void;
 }) {
   const [regression, setRegression] = React.useState<RegressionSummary | null>(null);
   const [goldenSummary, setGoldenSummary] = React.useState<GoldenSummary | null>(null);
@@ -624,11 +643,12 @@ function HomeDashboardPanel({
 
   return (
     <section className="stack dashboard-home">
+      <CoreCoverageMatrixPanel refreshToken={refreshToken} onNavigateToResults={onNavigateToResults} />
       <div className="dashboard-grid">
         <div className="panel metric-panel">
-          <small>Golden</small>
+          <small><TermTooltip label={t('golden')} explain="人がレビューして正しいと確定した数値の件数です。この値は自動処理で上書きされません。" /></small>
           <strong>{goldenSummary?.golden_cell_count ?? '-'}</strong>
-          <span>negative {goldenSummary?.negative_golden_count ?? '-'}</span>
+          <span>除外扱い {goldenSummary?.negative_golden_count ?? '-'}</span>
         </div>
         <div className="panel metric-panel">
           <small>Regression</small>
@@ -652,7 +672,7 @@ function HomeDashboardPanel({
         <div className="panel-head">
           <div>
             <h2>品質ゲート</h2>
-            <p className="muted">golden凍結と回帰チェックをここから実行します。</p>
+            <p className="muted">「確定値」の凍結保存と、既存の確定値が崩れていないかの回帰チェックをここから実行します。</p>
           </div>
           <span className={`badge ${regressionPass ? 'succeeded' : 'pending'}`}>
             {regressionPass ? '回帰OK' : '確認待ち'}
@@ -662,7 +682,7 @@ function HomeDashboardPanel({
         <div className="toolbar">
           <button onClick={() => startJob('/api/jobs/regression-check', { mode: 'light' })} disabled={jobRunning}>回帰チェック light</button>
           <button className="secondary" onClick={() => startJob('/api/jobs/regression-check', { mode: 'full' })} disabled={jobRunning}>回帰チェック full</button>
-          <button className="ghost" onClick={() => startJob('/api/jobs/golden-freeze')} disabled={jobRunning}>Golden freeze</button>
+          <button className="ghost" onClick={() => startJob('/api/jobs/golden-freeze')} disabled={jobRunning}>確定値として凍結保存</button>
           <button className="ghost" onClick={refresh}>状態再読込</button>
         </div>
         <div className="detail-grid">
@@ -687,6 +707,124 @@ function HomeDashboardPanel({
       <CorroborationSummaryPanel job={job} onJob={onJob} onError={onError} jobRunning={jobRunning} refreshToken={refreshToken} />
       <ReviewTerminal job={job} />
     </section>
+  );
+}
+
+function coverageCellStatus(cell: CoreCoverageCell): 'full' | 'partial' | 'empty' | 'excluded' {
+  if (cell.total_years === 0) return 'excluded';
+  if (cell.filled_years >= cell.total_years) return 'full';
+  if (cell.filled_years > 0) return 'partial';
+  return 'empty';
+}
+
+function CoreCoverageMatrixPanel({
+  refreshToken,
+  onNavigateToResults
+}: {
+  refreshToken: number;
+  onNavigateToResults: (target: ResultsFilterTarget) => void;
+}) {
+  const [coverage, setCoverage] = React.useState<CoreCoverageResponse | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [localError, setLocalError] = React.useState('');
+
+  const refresh = React.useCallback(() => {
+    setLoading(true);
+    api<CoreCoverageResponse>('/api/coverage/core')
+      .then((result) => { setCoverage(result); setLocalError(''); })
+      .catch((err) => setLocalError(String(err)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  React.useEffect(() => {
+    refresh();
+  }, [refresh, refreshToken]);
+
+  function handleCellClick(companyId: string, cell: CoreCoverageCell) {
+    const yearForJump = cell.blank_years[0] ?? cell.recoverable_years[0];
+    onNavigateToResults({ company: companyId, fiscal_year: yearForJump ? String(yearForJump) : undefined });
+  }
+
+  return (
+    <div className="panel core-coverage-panel">
+      <div className="panel-head">
+        <div>
+          <h2>主要項目の充足マップ</h2>
+          <p className="muted">会社×主要項目の入力状況です。空欄セルをクリックすると該当会社の結果一覧に移動します。</p>
+        </div>
+        <button className="ghost" onClick={refresh} disabled={loading}>再読込</button>
+      </div>
+      {localError && <InlineError message={localError} />}
+      {!coverage ? (
+        <Empty message={loading ? '読み込み中です。' : 'データがありません。'} />
+      ) : (
+        <>
+          <div className="coverage-legend">
+            <span className="coverage-swatch full">全年度そろっている</span>
+            <span className="coverage-swatch partial">一部だけ入っている</span>
+            <span className="coverage-swatch empty">ほとんど空欄</span>
+            <span className="coverage-swatch excluded">対象外</span>
+            <span className="coverage-swatch recoverable">自動で埋められそう</span>
+          </div>
+          <div className="coverage-table-scroll">
+            <table className="coverage-table">
+              <thead>
+                <tr>
+                  <th>会社</th>
+                  {coverage.fields.map((field) => {
+                    const summary = coverage.summary[field.field_id];
+                    return (
+                      <th key={field.field_id}>
+                        <div className="coverage-field-header">
+                          <span>{field.field_name_ja || field.field_id}</span>
+                          {summary && (
+                            <small>
+                              {summary.filled}/{summary.total}
+                              {summary.recoverable > 0 ? ` (回復候補${summary.recoverable})` : ''}
+                            </small>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {coverage.companies.map((companyId) => (
+                  <tr key={companyId}>
+                    <th scope="row">{companyId}</th>
+                    {coverage.fields.map((field) => {
+                      const cell = coverage.matrix[field.field_id]?.[companyId];
+                      if (!cell) {
+                        return <td key={field.field_id} className="coverage-cell excluded">-</td>;
+                      }
+                      const cellStatus = coverageCellStatus(cell);
+                      const hasRecoverable = cell.recoverable_years.length > 0;
+                      const clickable = cellStatus !== 'excluded';
+                      return (
+                        <td
+                          key={field.field_id}
+                          className={`coverage-cell ${cellStatus}${hasRecoverable ? ' recoverable' : ''}${clickable ? ' clickable' : ''}`}
+                          onClick={clickable ? () => handleCellClick(companyId, cell) : undefined}
+                          title={
+                            cellStatus === 'excluded'
+                              ? '対象外の会社・年度です'
+                              : `充足 ${cell.filled_years}/${cell.total_years} 年度${hasRecoverable ? ` / 自動回復候補 ${cell.recoverable_years.length}年度` : ''}`
+                          }
+                        >
+                          {cellStatus === 'excluded' ? '対象外' : `${cell.filled_years}/${cell.total_years}`}
+                          {hasRecoverable && <span className="coverage-badge">自動回復</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -1115,19 +1253,30 @@ function ResultsPanel({
   job,
   onJob,
   onAudit,
-  onReview
+  onReview,
+  initialFilter
 }: {
   refreshToken: number;
   job: Job | null;
   onJob: (job: Job) => void;
   onAudit: (target: { company_year_id: string; field_id: string }) => void;
   onReview: (target: ReviewTarget) => void;
+  initialFilter?: ResultsFilterTarget | null;
 }) {
   const [page, setPage] = React.useState(1);
   const [company, setCompany] = React.useState('');
   const [year, setYear] = React.useState('');
   const [periodType, setPeriodType] = React.useState('annual');
   const [preset, setPreset] = React.useState('all');
+
+  React.useEffect(() => {
+    if (!initialFilter) return;
+    setCompany(initialFilter.company);
+    if (initialFilter.fiscal_year) {
+      setYear(initialFilter.fiscal_year);
+    }
+    setPage(1);
+  }, [initialFilter]);
   const [data, setData] = React.useState<WidePage | null>(null);
   const [dataReloadToken, setDataReloadToken] = React.useState(0);
   const [error, setError] = React.useState('');
@@ -1330,7 +1479,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
         method: 'POST',
         body: JSON.stringify({ source_concept_id: selectedId, target_concept_id: targetId }),
       });
-      setMessage(`統合しました: mapping ${result.mappings_retargeted}件を移動`);
+      setMessage(`統合しました: 対応付け ${result.mappings_retargeted}件を移動`);
       load();
     } catch (err) {
       onError(String(err));
@@ -1344,7 +1493,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
         method: 'POST',
         body: JSON.stringify({ source_concept_id: selectedId, new_concepts: [splitDraft] }),
       });
-      setMessage('分割先概念を作成しました');
+      setMessage('分割先の項目を作成しました');
       setSplitDraft({ concept_id: '', concept_name_ja: '', category: '', data_scope: '', target_unit: '', period_type: '', definition_ja: '' });
       load();
     } catch (err) {
@@ -1357,13 +1506,13 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>概念管理</h2>
-            <p className="muted">canonical_concepts を確認し、概念属性・統合・分割先を管理します。</p>
+            <h2>表の項目の管理</h2>
+            <p className="muted">最終的な表に出てくる「項目（{t('concept')}）」の一覧です。名称や定義の修正、同じ意味の項目の統合、項目の分割をここで行います。</p>
           </div>
           <span className="badge">total {data?.total ?? '-'}</span>
         </div>
         <div className="toolbar">
-          <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="概念ID・名称・カテゴリ検索" />
+          <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="項目ID・名称・カテゴリ検索" />
           <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
             <option value="">全status</option>
             <option value="active">active</option>
@@ -1428,14 +1577,14 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                 <label>計算式<textarea rows={3} value={draft.calculation_formula || ''} onChange={(event) => setDraft({ ...draft, calculation_formula: event.target.value })} /></label>
                 <button onClick={saveConcept}>保存</button>
                 <hr />
-                <h3>統合</h3>
+                <h3>項目を統合</h3>
                 <div className="toolbar">
-                  <input value={targetId} onChange={(event) => setTargetId(event.target.value)} placeholder="統合先 concept_id" />
+                  <input value={targetId} onChange={(event) => setTargetId(event.target.value)} placeholder="統合先の項目ID" />
                   <button className="secondary" onClick={mergeConcept} disabled={!targetId || targetId === selectedId}>統合</button>
                 </div>
                 <h3>分割先を作成</h3>
-                <input value={splitDraft.concept_id} onChange={(event) => setSplitDraft({ ...splitDraft, concept_id: event.target.value })} placeholder="新concept_id（空なら自動）" />
-                <input value={splitDraft.concept_name_ja} onChange={(event) => setSplitDraft({ ...splitDraft, concept_name_ja: event.target.value })} placeholder="新概念名" />
+                <input value={splitDraft.concept_id} onChange={(event) => setSplitDraft({ ...splitDraft, concept_id: event.target.value })} placeholder="新しい項目ID（空なら自動）" />
+                <input value={splitDraft.concept_name_ja} onChange={(event) => setSplitDraft({ ...splitDraft, concept_name_ja: event.target.value })} placeholder="新しい項目名" />
                 <div className="inline-fields">
                   <input value={splitDraft.category} onChange={(event) => setSplitDraft({ ...splitDraft, category: event.target.value })} placeholder="category" />
                   <input value={splitDraft.target_unit} onChange={(event) => setSplitDraft({ ...splitDraft, target_unit: event.target.value })} placeholder="target_unit" />
@@ -1444,7 +1593,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                 <button className="ghost" onClick={splitConcept} disabled={!splitDraft.concept_name_ja}>分割先作成</button>
               </>
             ) : (
-              <Empty message="概念がありません" />
+              <Empty message="項目がありません" />
             )}
           </div>
         </div>
@@ -1865,7 +2014,7 @@ function CellDetailPanel({
         method: 'POST',
         body: JSON.stringify({ mapping_id: mappingId, decision: nextDecision, reviewer: 'web_cell_workbench' })
       });
-      setMessage(nextDecision === 'confirm' ? 'マッピング提案を承認しました。' : 'マッピング提案を却下しました。');
+      setMessage(nextDecision === 'confirm' ? '対応付けの提案を承認しました。' : '対応付けの提案を却下しました。');
       onChanged();
     } catch (err) {
       setPanelError(String(err));
@@ -2030,7 +2179,7 @@ function CellDetailPanel({
           <button type="button" className="secondary" onClick={saveFieldName} disabled={busy === 'field-name' || !fieldNameDraft.trim() || fieldNameDraft.trim() === detail.field_name_ja}>
             {busy === 'field-name' ? '更新中...' : '項目名を更新'}
           </button>
-          <p className="hint">値の判定ではなく、field_definition.csv と概念名の表示を直します。</p>
+          <p className="hint">値の判定ではなく、項目名の表示を直します。</p>
         </div>
 
         <div className="workbench-card">
@@ -2098,30 +2247,30 @@ function CellDetailPanel({
 
       <MiniRows title="レビュー候補" rows={detail.review_rows} columns={reviewColumns} emptyMessage="レビュー候補はありません。" />
       <MiniRows title="保存済みレビュー" rows={detail.resolved_rows} columns={resolvedColumns} emptyMessage="保存済みレビューはありません。" />
-      <MiniRows title="根拠" rows={detail.audit_rows} columns={auditColumns} emptyMessage="source_audit.csv に該当行はありません。" />
+      <MiniRows title="根拠" rows={detail.audit_rows} columns={auditColumns} emptyMessage="該当する根拠データはありません。" />
       <MiniRows
-        title="出典チェーン: fact"
+        title={`${t('source_chain')}: 確定した数値`}
         rows={factRows}
         columns={['value', 'resolution', 'corroboration_count', 'conflict_count', 'buckets', 'sources', 'decided_at_utc']}
-        emptyMessage="semantics のfact解決はありません。"
+        emptyMessage="確定した数値の記録はありません。"
       />
       <MiniRows
-        title="出典チェーン: observed item"
+        title={`${t('source_chain')}: ${t('observed')}`}
         rows={chain?.observed_items || []}
         columns={['observed_item_id', 'item_kind', 'element_id', 'label_ja', 'normalized_scope', 'unit', 'source']}
-        emptyMessage="対応する observed_item はありません。"
+        emptyMessage="対応する有報の項目はありません。"
       />
       <MiniRows
-        title="出典チェーン: mapping"
+        title={`${t('source_chain')}: ${t('mapping')}`}
         rows={chain?.mappings || []}
         columns={['mapping_id', 'observed_item_id', 'concept_id', 'action', 'status', 'decided_by', 'confidence']}
-        emptyMessage="対応する concept_mapping はありません。"
+        emptyMessage="対応する項目の対応付けはありません。"
       />
       <MiniRows
-        title="出典チェーン: corroboration"
+        title={`${t('source_chain')}: ${t('corroboration')}`}
         rows={chain?.corroborations || []}
         columns={['check_kind', 'check_ref', 'matched', 'primary_value', 'other_value', 'difference', 'restatement_suspected', 'detail']}
-        emptyMessage="照合証跡はありません。"
+        emptyMessage="照合の記録はありません。"
       />
     </div>
   );
@@ -2409,10 +2558,10 @@ function FactbooksPanel({
             <div className="metric" key={key}><small>{key}</small><strong>{value}</strong></div>
           ))}
         </div>
-        <p className="hint">`no_mapping` は有報側の同粒度フィールド未定義、`missing_yuho_value` はフィールド定義はあるが完成表の値が空欄です。用途別受注を無理に総額へ寄せるマッピングは行いません。</p>
+        <p className="hint">`no_mapping` は有報側の同粒度フィールド未定義、`missing_yuho_value` はフィールド定義はあるが完成表の値が空欄です。用途別受注を無理に総額へ寄せる対応付けは行いません。</p>
         <div className="grid two">
           <div>
-            <h3>未マッピング上位</h3>
+            <h3>未対応付け上位</h3>
             <DataTable
               data={validation?.top_no_mapping_categories || []}
               columns={['category_type', 'use_category_normalized', 'use_category_label', 'source_metric_id', 'count']}
@@ -3037,7 +3186,7 @@ function ReviewPanel({
               >
                 {savingFieldName ? '項目名更新中...' : '項目名を更新'}
               </button>
-              <p className="hint">値ではなく項目名が誤っている場合はここで直します。field_definition.csv と概念名を更新し、抽出値やレビュー判定は変更しません。</p>
+              <p className="hint">値ではなく項目名が誤っている場合はここで直します。項目の名称表示を更新し、抽出値やレビュー判定は変更しません。</p>
             </div>
             {isEditingSavedReview && <p className="hint">この行は保存済みレビューです。内容を直して保存すると同じ会社年度・項目を上書きします。</p>}
             <label>判定</label>
@@ -4636,8 +4785,8 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>照合グループレビュー</h2>
-            <p className="muted">identity_group_mismatch を rule_id ごとに確認し、既存のレビュー保存フローへ一括反映します。</p>
+            <h2>照合グループの確認</h2>
+            <p className="muted">同じルールで見つかった「数値の食い違い」をグループごとにまとめて表示しています。内容を確認してまとめて承認すると、通常のレビュー保存と同じ扱いで反映されます。</p>
           </div>
           <span className="badge">groups {data?.total ?? '-'}</span>
         </div>
@@ -4694,10 +4843,10 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
 }
 
 const MAPPING_ACTION_LABELS: Record<string, string> = {
-  map: 'map（既存概念へ対応）',
-  different_scope: 'different_scope（範囲不一致）',
-  ignore: 'ignore（対応不要）',
-  new_concept: 'new_concept（新規概念）'
+  map: '既存の項目に対応付ける',
+  different_scope: '範囲が違うため対応不可',
+  ignore: '対応不要',
+  new_concept: '新しい項目として追加'
 };
 
 function MappingReviewPanel({ onError, refreshToken }: { onError: (message: string) => void; refreshToken: number }) {
@@ -4770,29 +4919,31 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
       <div className="panel automation-panel">
         <div className="panel-head">
           <div>
-            <h2>マッピング提案レビュー</h2>
-            <p className="muted">status=proposed のマッピング提案のみを表示します。承認済み・却下済みの既存判断は変更しません。</p>
+            <h2>対応付けの確認</h2>
+            <p className="muted">
+              システムが見つけた「有報の項目」と「表の項目」の<TermTooltip label={t('mapping')} explain="有報に出てくる項目名を、最終的な表の項目に結びつけること。" />の提案（{t('proposed')}）です。内容を確認して承認・却下してください。承認済み・却下済みの判断が変わることはありません。
+            </p>
           </div>
         </div>
         <div className="automation-grid">
           <div className="metric"><small>提案合計</small><strong>{data?.total ?? '-'}</strong></div>
-          <div className="metric"><small>map</small><strong>{counts.map ?? 0}</strong></div>
-          <div className="metric"><small>different_scope</small><strong>{counts.different_scope ?? 0}</strong></div>
-          <div className="metric"><small>ignore</small><strong>{counts.ignore ?? 0}</strong></div>
-          <div className="metric"><small>new_concept</small><strong>{counts.new_concept ?? 0}</strong></div>
+          <div className="metric"><small>対応付ける</small><strong>{counts.map ?? 0}</strong></div>
+          <div className="metric"><small>範囲が違う</small><strong>{counts.different_scope ?? 0}</strong></div>
+          <div className="metric"><small>対応不要</small><strong>{counts.ignore ?? 0}</strong></div>
+          <div className="metric"><small>新しい項目にする</small><strong>{counts.new_concept ?? 0}</strong></div>
         </div>
         <div className="toolbar">
           <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
-            <option value="">action: すべて</option>
-            <option value="map">map</option>
-            <option value="different_scope">different_scope</option>
-            <option value="ignore">ignore</option>
-            <option value="new_concept">new_concept</option>
+            <option value="">提案の種類: すべて</option>
+            <option value="map">対応付ける</option>
+            <option value="different_scope">範囲が違う</option>
+            <option value="ignore">対応不要</option>
+            <option value="new_concept">新しい項目にする</option>
           </select>
           <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)}>
             <option value="">判断主体: すべて</option>
             <option value="ai">AI提案</option>
-            <option value="deterministic">決定的一致</option>
+            <option value="deterministic">{t('deterministic')}</option>
           </select>
           <select value={verdictFilter} onChange={(e) => setVerdictFilter(e.target.value)}>
             <option value="">数値照合: すべて</option>
@@ -4810,8 +4961,8 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
         <div className="panel automation-panel">
           <div className="panel-head">
             <div>
-              <h2>セル解決状況（参考）</h2>
-              <p className="muted">cell_resolutions の分布です（矛盾件数の把握用。マッピング提案とは別集計）。</p>
+              <h2>セル判定状況（参考）</h2>
+              <p className="muted">各セルの判定結果の内訳です（矛盾件数の把握用。上の対応付け提案とは別の集計です）。</p>
             </div>
           </div>
           <div className="automation-grid">
@@ -4838,25 +4989,25 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
             </div>
             <div className="grid">
               <div>
-                <small>action</small>
+                <small>提案の種類</small>
                 <strong>{MAPPING_ACTION_LABELS[p.action] || p.action}</strong>
               </div>
               <div>
-                <small>マッピング先概念</small>
-                <strong>{p.concept?.concept_name_ja || p.new_concept_proposal?.concept_name_ja || '(なし/新概念)'}</strong>
+                <small>対応付け先の項目</small>
+                <strong>{p.concept?.concept_name_ja || p.new_concept_proposal?.concept_name_ja || '(なし/新しい項目)'}</strong>
               </div>
             </div>
             {p.corroboration && (
               <div className={`callout corroboration-${p.corroboration.verdict}`}>
                 <strong>
-                  数値照合: {CORROBORATION_VERDICT_LABELS[p.corroboration.verdict] || p.corroboration.verdict}
+                  {t('corroboration')}: {CORROBORATION_VERDICT_LABELS[p.corroboration.verdict] || p.corroboration.verdict}
                   {p.corroboration.overlap_count > 0
                     ? ` — 一致 ${p.corroboration.match_count}/${p.corroboration.overlap_count}（${Math.round((p.corroboration.match_rate || 0) * 100)}%）`
                     : ''}
                 </strong>
                 {(p.corroboration.examples || []).slice(0, 3).map((ex, idx) => (
                   <div className="muted" key={idx} style={{ fontSize: '0.85em' }}>
-                    {ex.company_year_id}: 要素値={Number(ex.element_value).toLocaleString()} vs 概念値={Number(ex.concept_value).toLocaleString()} {ex.matched ? '✓' : '✗'}
+                    {ex.company_year_id}: 有報の値={Number(ex.element_value).toLocaleString()} vs 表の値={Number(ex.concept_value).toLocaleString()} {ex.matched ? '✓' : '✗'}
                   </div>
                 ))}
               </div>
@@ -4919,8 +5070,8 @@ function AlgorithmAuditFindingsPanel({ onError, refreshToken }: { onError: (mess
       <div className="panel automation-panel">
         <div className="panel-head">
           <div>
-            <h2>アルゴリズム監査findings</h2>
-            <p className="muted">決定的検出器（重複タグ／矛盾マッピング／低カバレッジ／孤立概念／review_*セクション残骸）の結果です。修正はここでは行いません。</p>
+            <h2>アルゴリズム監査の指摘一覧</h2>
+            <p className="muted">仕組みが自動で見つけた気になる点（重複タグ／矛盾する対応付け／カバレッジ不足／孤立した項目／レビュー残骸など）の一覧です。ここでは修正は行いません。</p>
           </div>
           <button onClick={rebuild} disabled={busy}>{busy ? '生成中…' : '再生成'}</button>
         </div>
@@ -5220,7 +5371,29 @@ const miniColumnLabels: Record<string, string> = {
   reviewed_at: '保存日時',
   applied_status: '反映状態',
   applied_value: '反映値',
-  applied_at: '反映日時'
+  applied_at: '反映日時',
+  resolution: '確定した数値',
+  corroboration_count: '数値照合の件数',
+  conflict_count: '不一致の件数',
+  observed_item_id: '有報の項目ID',
+  item_kind: '種類',
+  element_id: '要素ID',
+  label_ja: '名称',
+  normalized_scope: 'スコープ',
+  source: '出典',
+  mapping_id: '対応付けID',
+  concept_id: '表の項目ID',
+  action: '種類',
+  status: '状態',
+  decided_by: '判断者',
+  check_kind: '照合の種類',
+  check_ref: '照合対象',
+  matched: '一致',
+  primary_value: '主値',
+  other_value: '比較値',
+  difference: '差分',
+  restatement_suspected: '訂正の疑い',
+  detail: '詳細'
 };
 
 const sourceSummaryColumnLabels: Record<string, string> = {

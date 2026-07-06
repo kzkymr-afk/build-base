@@ -2299,4 +2299,155 @@ dd {
 .callout.corroboration-corroborated { border-left-color: #2e7d32; background: rgba(46,125,50,0.08); }
 .callout.corroboration-conflicts { border-left-color: #c62828; background: rgba(198,40,40,0.09); }
 .callout.corroboration-unverifiable { border-left-color: #9e9e9e; background: rgba(0,0,0,0.04); }
+
+/* S2: 主要項目の充足マップ（ホーム最上段） */
+.core-coverage-panel {
+  margin-bottom: 4px;
+}
+
+.coverage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 4px 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.coverage-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coverage-swatch::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+}
+
+.coverage-swatch.full::before { background: rgba(46, 125, 50, 0.55); }
+.coverage-swatch.partial::before { background: rgba(214, 168, 22, 0.55); }
+.coverage-swatch.empty::before { background: rgba(198, 40, 40, 0.5); }
+.coverage-swatch.excluded::before { background: var(--border); }
+.coverage-swatch.recoverable::before { background: rgba(33, 118, 199, 0.55); }
+
+.coverage-table-scroll {
+  overflow-x: auto;
+}
+
+.coverage-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.coverage-table th,
+.coverage-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.coverage-table thead th {
+  background: var(--surface-soft, rgba(255,255,255,0.03));
+  vertical-align: bottom;
+}
+
+.coverage-table tbody th {
+  text-align: left;
+  font-weight: 600;
+}
+
+.coverage-field-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.coverage-field-header small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.coverage-cell {
+  position: relative;
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage-cell.full { background: rgba(46, 125, 50, 0.18); }
+.coverage-cell.partial { background: rgba(214, 168, 22, 0.18); }
+.coverage-cell.empty { background: rgba(198, 40, 40, 0.16); }
+.coverage-cell.excluded { color: var(--muted); background: transparent; }
+
+.coverage-cell.clickable {
+  cursor: pointer;
+}
+
+.coverage-cell.clickable:hover {
+  outline: 2px solid var(--border-strong);
+  outline-offset: -2px;
+}
+
+.coverage-badge {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(33, 118, 199, 0.25);
+  color: var(--muted-strong);
+}
 .callout.corroboration-weak { border-left-color: #f9a825; background: rgba(249,168,37,0.10); }
+
+/* 用語ミニ説明（TermTooltip） */
+.term-tooltip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.term-tooltip-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted-strong);
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+}
+
+.term-tooltip-bubble {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: 130%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 240px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  color: var(--muted-strong);
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  z-index: 20;
+  transition: opacity 0.1s ease-in-out;
+}
+
+.term-tooltip-icon:hover .term-tooltip-bubble,
+.term-tooltip-icon:focus .term-tooltip-bubble {
+  visibility: visible;
+  opacity: 1;
+}

@@ -9,11 +9,11 @@ export const tabs = [
   ['audit', '根拠'],
   ['review', 'セルレビュー履歴'],
   ['reconciliation', '照合グループ'],
-  ['mapping_review', '項目対応レビュー'],
+  ['mapping_review', '対応付けの確認'],
   ['algorithm_audit_findings', 'アルゴリズム監査'],
   ['ai', 'AI分析'],
   ['report', 'レポート'],
-  ['concepts', '概念']
+  ['concepts', '表の項目の管理']
 ] as const;
 
 export const tabGroups = [

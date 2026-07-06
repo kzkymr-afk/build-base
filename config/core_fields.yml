@@ -1,0 +1,23 @@
+# BuildBase S2: 主要項目カバレッジ設定
+#
+# 「主要項目」の一覧はこのファイルで管理する（UIでは管理しない）。
+# 一覧を増減したい場合はこのファイルを直接編集する。
+# 各 field_id は config/field_definition.csv に定義済みの項目を指す想定。
+#
+# 用途: services/coverage.py の build_core_coverage_matrix が本ファイルを読み、
+# 会社×年度×主要項目の充足マトリクスを作る（ホーム画面「主要項目の充足マップ」）。
+
+core_fields:
+  # 受注3項目（S1a逆引きエンジンの対象。574セル欠落が判明していた領域）
+  - building_orders_total
+  - completed_building
+  - backlog_building_next
+  # 主要財務（連結）
+  - net_sales_consolidated
+  - operating_income_consolidated
+  - ordinary_income_consolidated
+  - profit_consolidated
+  - total_assets_consolidated
+  - equity_ratio_consolidated
+  - employees_consolidated
+  - rd_expense

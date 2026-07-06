@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from yuho_auto_extract import __version__
-from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, cells, company_factbooks, corroboration_report, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts, reconciliation
+from yuho_auto_extract.services import ai_prompt, algorithm_audit, algorithm_audit_findings, automation, cells, company_factbooks, corroboration_report, coverage, datasets, field_admin, golden, mapping_review, market, pipeline, reviews, semantics_concepts, reconciliation
 from yuho_auto_extract.web_api.jobs import JobAlreadyRunning, JobManager
 
 
@@ -690,6 +690,11 @@ def regression_summary() -> Dict[str, Any]:
 @app.get("/api/golden/summary")
 def golden_summary() -> Dict[str, Any]:
     return golden.read_golden_summary(PROJECT_ROOT)
+
+
+@app.get("/api/coverage/core")
+def coverage_core() -> Dict[str, Any]:
+    return coverage.build_core_coverage_matrix(PROJECT_ROOT)
 
 
 def _start_job(name: str, target: Any) -> Dict[str, Any]:
