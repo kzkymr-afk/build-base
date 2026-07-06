@@ -279,6 +279,28 @@ def run_regression(root: Path, *, mode: str = REGRESSION_MODE_LIGHT) -> Dict[str
         _run_shadow_pipeline(shadow_root, mode=mode)
         actual_cells = _read_shadow_final_long(shadow_root)
 
+    # source_inference 由来の golden は、シャドウの素の抽出パイプラインでは
+    # 原理的に再現できない（値は逆引き推論がレビュー経由で書いたもので、
+    # 抽出ルールには載っていない）。これらのセルのゲートは「推論の再実行」で
+    # 検証する: 恒等式フィッティングを実データ（candidate_blocks・読み取り専用）で
+    # 再計算し、同じ値が再現できれば pass、推論コード/データの変化で再現
+    # できなくなれば missing としてゲート発火する。
+    source_inference_keys = {
+        key for key, entry in golden.items()
+        if str(entry.get("origin") or "") == GOLDEN_ORIGIN_SOURCE_INFERENCE
+    }
+    if source_inference_keys:
+        from . import source_inference as source_inference_service
+
+        inferred = source_inference_service.infer_values_for_cells(root, source_inference_keys)
+        for key in source_inference_keys:
+            if key in inferred:
+                actual_cells[key] = inferred[key]
+            else:
+                # 再推論で値が出なかった場合は actual から確実に除き、
+                # missing_in_actual（ゲート対象）として顕在化させる。
+                actual_cells.pop(key, None)
+
     diff_rows, summary = _diff(golden, negative_golden, actual_cells)
     summary["mode"] = mode
     summary["run_id"] = uuid.uuid4().hex

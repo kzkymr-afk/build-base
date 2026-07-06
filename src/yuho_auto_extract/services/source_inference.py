@@ -33,7 +33,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .. import local_table_extractor as lte
 from ..io_utils import ensure_parent, is_blankish, read_table
@@ -697,6 +697,37 @@ def _building_role_values_for_field(
             }
         )
     return found_values
+
+
+def infer_values_for_cells(root: Path, keys: Iterable[Tuple[str, str]]) -> Dict[Tuple[str, str], float]:
+    """(company_year_id, field_id) 集合の各セルについて、恒等式フィットから
+    high_confidence（計列あり・整合・値ユニーク）の値を再推論して返す。
+
+    final の充足状態には依存しない（estimate_recovery と違い already_filled で
+    スキップしない）。用途は回帰ゲート: source_inference 由来の golden 値が
+    「推論を再実行しても同じ値になるか」を検証する。推論コードや candidate_blocks
+    が変わって値が再現できなくなったセルは戻り値に含めず、呼び出し側で
+    missing 扱い（＝ゲート発火）にする。読み取り専用。
+    """
+    by_cy: Dict[str, List[str]] = defaultdict(list)
+    for cy, field_id in keys:
+        by_cy[str(cy)].append(str(field_id))
+    out: Dict[Tuple[str, str], float] = {}
+    if not by_cy:
+        return out
+    conn = open_edinet_db_readonly(root)
+    try:
+        for cy, field_ids in by_cy.items():
+            all_fitted = _fit_all_for_company_year(conn, cy)
+            for field_id in field_ids:
+                status, details = _classify_found_values(
+                    _building_role_values_for_field(all_fitted, field_id)
+                )
+                if status == "high_confidence" and details:
+                    out[(cy, field_id)] = float(details[0]["value"])
+    finally:
+        conn.close()
+    return out
 
 
 def _classify_found_values(found_values: Sequence[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
