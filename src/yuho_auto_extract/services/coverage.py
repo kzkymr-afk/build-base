@@ -136,12 +136,13 @@ def _load_filled_keys(root: Path, field_ids: Sequence[str]) -> Set[Tuple[str, st
 
 
 def _load_recoverable_keys(root: Path, field_ids: Sequence[str]) -> Set[Tuple[str, str]]:
-    """source_inference_dry_run.json があり対象fieldがカバー範囲内であれば、
-    company_year × field 単位の high_confidence 判定を実測して返す。
+    """source_inference_dry_run.json のセル別分類から high_confidence を返す。
 
-    レポートファイルが存在しない場合、または対象fieldがレポートの
-    対象範囲（受注3項目）に含まれない場合は空集合を返す（読み取り専用・
-    副作用なし。estimate_recovery自体もDB読み取り専用）。
+    レポートに永続化された classification（company_year_id -> field_id -> status）を
+    読むだけ（推論の再計算はしない。毎リクエストの estimate_recovery 実行は
+    /api/coverage/core を27秒にする実測問題があった）。レポートが無い・古い形式で
+    classification キーが無い・対象fieldが範囲外の場合は空集合（ベストエフォート）。
+    最新化したいときは CLI `infer-sources-from-confirmed` でレポートを再生成する。
     """
     import json as _json
 
@@ -153,26 +154,17 @@ def _load_recoverable_keys(root: Path, field_ids: Sequence[str]) -> Set[Tuple[st
     except (OSError, ValueError):
         return set()
     report_field_ids = set(report.get("field_ids") or [])
-    target_field_ids = [f for f in field_ids if f in report_field_ids]
+    target_field_ids = {f for f in field_ids if f in report_field_ids}
     if not target_field_ids:
         return set()
 
-    try:
-        from . import source_inference
-    except ImportError:
-        return set()
-
-    try:
-        recovery = source_inference.estimate_recovery(root, field_ids=target_field_ids)
-    except Exception:
-        # dry-run照会はベストエフォート。失敗してもカバレッジ本体は返す。
-        return set()
-
-    classification = recovery.get("classification") or {}
+    classification = report.get("classification") or {}
     recoverable: Set[Tuple[str, str]] = set()
     for company_year_id, fields in classification.items():
+        if not isinstance(fields, dict):
+            continue
         for field_id, status in fields.items():
-            if status == "high_confidence":
+            if field_id in target_field_ids and status == "high_confidence":
                 recoverable.add((str(company_year_id), str(field_id)))
     return recoverable
 

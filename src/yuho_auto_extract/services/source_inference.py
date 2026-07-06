@@ -777,6 +777,11 @@ def build_dry_run_report(root: Path, field_ids: Sequence[str] = DEFAULT_FIELD_ID
         "by_field": {field_id: dict(counts) for field_id, counts in by_field_counts.items()},
         "by_company": {company_id: dict(counts) for company_id, counts in by_company.items()},
         "field_ids": list(field_ids),
+        # セル別分類（company_year_id -> field_id -> status）。
+        # coverage 等の下流がレポートを読むだけで recoverable 判定できるように
+        # 永続化する（毎リクエストの estimate_recovery 再計算は重く、
+        # /api/coverage/core が27秒かかる実測問題への対策）。
+        "classification": {cy: dict(fields) for cy, fields in classification.items()},
     }
 
     reports_dir = root / REPORTS_DIR

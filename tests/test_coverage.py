@@ -211,28 +211,26 @@ class BuildCoreCoverageMatrixTests(unittest.TestCase):
             _write_exclusions(root, [])
             _write_core_fields(root, ["building_orders_total"])
 
-            report_path = root / coverage.SOURCE_INFERENCE_DRY_RUN_RELATIVE_PATH
-            ensure_parent(report_path)
-            report_path.write_text(
-                json.dumps({"field_ids": ["building_orders_total"]}), encoding="utf-8"
-            )
-
+            # レポートJSONに永続化された classification を読むだけ
+            # （ライブ再計算はしない＝/api/coverage/core 27秒問題への対策）。
             fake_classification = {
                 "ACME_2020": {"building_orders_total": "high_confidence"},
                 "ACME_2021": {"building_orders_total": "low_confidence"},
                 "BETA_2020": {"building_orders_total": "high_confidence"},
             }
+            report_path = root / coverage.SOURCE_INFERENCE_DRY_RUN_RELATIVE_PATH
+            ensure_parent(report_path)
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "field_ids": ["building_orders_total"],
+                        "classification": fake_classification,
+                    }
+                ),
+                encoding="utf-8",
+            )
 
-            from yuho_auto_extract.services import source_inference as si
-
-            original = si.estimate_recovery
-            si.estimate_recovery = lambda root, field_ids=None: {  # type: ignore
-                "classification": fake_classification
-            }
-            try:
-                result = coverage.build_core_coverage_matrix(root)
-            finally:
-                si.estimate_recovery = original
+            result = coverage.build_core_coverage_matrix(root)
 
             field_matrix = result["matrix"]["building_orders_total"]
             self.assertEqual(field_matrix["ACME"]["recoverable_years"], [2020])
