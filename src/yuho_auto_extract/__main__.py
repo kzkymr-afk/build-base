@@ -186,6 +186,13 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("factbook-validate").set_defaults(handler=cmd_factbook_validate)
     sub.add_parser("factbook-coverage").set_defaults(handler=cmd_factbook_coverage)
     sub.add_parser("init-xlsx").set_defaults(handler=cmd_init_xlsx)
+    p = sub.add_parser("infer-sources-from-confirmed")
+    p.add_argument(
+        "--fields",
+        default=",".join(["building_orders_total", "completed_building", "backlog_building_next"]),
+        help="Comma-separated field_ids to run source inference for.",
+    )
+    p.set_defaults(handler=cmd_infer_sources_from_confirmed)
     p = sub.add_parser("web")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", default=8765, type=int)
@@ -688,6 +695,27 @@ def cmd_semantics_coverage(root: Path, args: argparse.Namespace) -> int:
     print(f"observed_total={summary.get('observed_total', 0)}")
     print(f"observed_unmapped={summary.get('observed_unmapped', 0)}")
     print(f"mappings_total={summary.get('mappings_total', 0)}")
+    return 0
+
+
+def cmd_infer_sources_from_confirmed(root: Path, args: argparse.Namespace) -> int:
+    """BuildBase S1a: 出典逆引きエンジンのdry-runレポートを生成する（読み取り専用）。
+
+    final/review/config/semantics.db/edinet.db への書き込みは一切行わない。
+    出力は data/reports/source_inference_dry_run.json / .md のみ。
+    """
+    from .services import source_inference
+
+    field_ids = [field.strip() for field in str(args.fields).split(",") if field.strip()]
+    result = source_inference.build_dry_run_report(root, field_ids)
+    report = result["report"]
+    repro = report.get("reproduction", {})
+    print(f"wrote {result.get('report_json_path')}")
+    print(f"known_cells_total={repro.get('total', 0)}")
+    print(f"known_cells_matched_high_confidence={repro.get('matched_high_confidence', 0)}")
+    print(f"known_cells_reproduction_rate={repro.get('rate', 0.0):.3f}")
+    for status, count in sorted((report.get("summary") or {}).items()):
+        print(f"missing_cells.{status}={count}")
     return 0
 
 

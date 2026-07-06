@@ -328,6 +328,25 @@ def promote_ai_mappings(
     )
 
 
+def infer_sources_from_confirmed(
+    root: Path,
+    log: Optional[LogCallback] = None,
+    fields: Optional[list[str]] = None,
+) -> int:
+    """S1a: 出典逆引きエンジンのdry-runレポートを生成する（読み取り専用）。
+    final/review/config/semantics.db/edinet.db への書き込みは一切行わない。
+    出力は data/reports/source_inference_dry_run.json / .md のみ。"""
+    _prepare(root)
+    field_ids = fields or ["building_orders_total", "completed_building", "backlog_building_next"]
+    return _call(
+        "infer-sources-from-confirmed",
+        cli.cmd_infer_sources_from_confirmed,
+        root,
+        argparse.Namespace(fields=",".join(field_ids)),
+        log,
+    )
+
+
 def regression_check(root: Path, log: Optional[LogCallback] = None, mode: str = "light") -> int:
     """P3: 一時shadow_root上で再抽出し、凍結済みgoldenとdiffする。
     data/reports/regression_diff.csv・regression_summary.json を書く。

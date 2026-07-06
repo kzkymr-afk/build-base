@@ -144,6 +144,29 @@ def _validate_yoy(records: List[Dict[str, Any]], rule_id: str, rule: Dict[str, A
     return results
 
 
+def check_backlog_equation_single(
+    prev_backlog: Optional[float],
+    orders: Optional[float],
+    completed: Optional[float],
+    next_backlog: Optional[float],
+    tolerance_rule: Dict[str, Any],
+) -> Tuple[str, Optional[float]]:
+    """受注工事高恒等式（前期繰越+当期受注-当期完成=次期繰越）の単一セル検算。
+
+    S1a/S1bの逆引き・学習パターン適用が、1セル単位で「推定値が確からしいか」
+    を検算するために使う（S1a′で`_validate_backlog`から切り出し）。
+
+    戻り値: (status, difference)。status は "pass" / "fail" / "not_applicable"。
+    いずれかがNoneなら "not_applicable" で diff=None。
+    """
+    if None in (prev_backlog, orders, completed, next_backlog):
+        return "not_applicable", None
+    expected = prev_backlog + orders - completed
+    diff = expected - next_backlog
+    status = "pass" if _within_tolerance(diff, next_backlog, tolerance_rule) else "fail"
+    return status, diff
+
+
 def _validate_backlog(records: List[Dict[str, Any]], rule_id: str, rule: Dict[str, Any]) -> List[Dict[str, Any]]:
     by_company: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for row in records:
@@ -158,13 +181,7 @@ def _validate_backlog(records: List[Dict[str, Any]], rule_id: str, rule: Dict[st
             orders = _value(fields.get("building_orders_total"))
             completed = _value(fields.get("completed_building"))
             next_backlog = _value(fields.get("backlog_building_next"))
-            if None in (prev_backlog, orders, completed, next_backlog):
-                status = "not_applicable"
-                diff = None
-            else:
-                expected = prev_backlog + orders - completed
-                diff = expected - next_backlog
-                status = "pass" if _within_tolerance(diff, next_backlog, rule) else "fail"
+            status, diff = check_backlog_equation_single(prev_backlog, orders, completed, next_backlog, rule)
             results.append(
                 {
                     "company_year_id": company_year_id,
