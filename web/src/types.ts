@@ -388,6 +388,21 @@ export type MappingProposalsResult = {
   proposals: MappingProposal[];
 };
 
+export type MappingBulkRejectResult = {
+  preview: boolean;
+  rejected: number;
+  candidates: number;
+  examples: {
+    mapping_id?: string;
+    element_local_name?: string;
+    label_ja?: string;
+    concept_id?: string;
+    concept_name_ja?: string;
+    overlap_count?: number;
+    match_rate?: number;
+  }[];
+};
+
 export type ConceptRow = {
   concept_id: string;
   concept_name_ja: string;
@@ -429,6 +444,15 @@ export type ReconciliationGroup = {
 export type ReconciliationGroupsResult = {
   total: number;
   groups: ReconciliationGroup[];
+};
+
+export type ReconciliationApplyResult = {
+  preview: boolean;
+  group_id: string;
+  applied_items: number;
+  target_count: number;
+  total: number;
+  targets?: Row[];
 };
 
 export type AlgorithmAuditFinding = {

@@ -381,6 +381,51 @@ class ConfirmRejectMappingProposalTests(unittest.TestCase):
             self.assertEqual(evidence["auto_reject"]["reason"], "numeric_conflict")
             self.assertEqual(evidence["auto_reject"]["match_rate"], 0.0)
 
+    def test_bulk_reject_conflicting_proposals_preview_does_not_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            conn = semantics_store.connect(root)
+            _seed_observed_item(conn, "xm_1", "jppfs_cor:BadMetric", normalized_scope="consolidated", unit="円")
+            _seed_concept(conn, "net_sales_consolidated", "売上高")
+            _seed_mapping(
+                conn,
+                "cmap_conflict",
+                observed_item_id="xm_1",
+                concept_id="net_sales_consolidated",
+                action="map",
+                status="proposed",
+                decided_by="ai:model-x",
+            )
+            conn.close()
+            _write_edinet_facts(
+                root,
+                [
+                    {"company_year_id": "A_2022", "element_id": "jppfs_cor:BadMetric", "value": 1_000_000},
+                    {"company_year_id": "A_2023", "element_id": "jppfs_cor:BadMetric", "value": 2_000_000},
+                    {"company_year_id": "A_2024", "element_id": "jppfs_cor:BadMetric", "value": 3_000_000},
+                ],
+            )
+            _write_final_master_long(
+                root,
+                [
+                    {"company_year_id": "A_2022", "field_id": "net_sales_consolidated", "value_normalized": "100", "unit_normalized": "百万円"},
+                    {"company_year_id": "A_2023", "field_id": "net_sales_consolidated", "value_normalized": "200", "unit_normalized": "百万円"},
+                    {"company_year_id": "A_2024", "field_id": "net_sales_consolidated", "value_normalized": "300", "unit_normalized": "百万円"},
+                ],
+            )
+
+            result = mapping_review.bulk_reject_conflicting_proposals(root, reviewer="tester", preview=True)
+
+            self.assertTrue(result["preview"])
+            self.assertEqual(result["candidates"], 1)
+            self.assertEqual(result["rejected"], 0)
+            self.assertEqual(result["examples"][0]["mapping_id"], "cmap_conflict")
+            conn = semantics_store.connect(root)
+            row = conn.execute("select status, decided_by from concept_mappings where mapping_id='cmap_conflict'").fetchone()
+            conn.close()
+            self.assertEqual(row["status"], "proposed")
+            self.assertEqual(row["decided_by"], "ai:model-x")
+
 
 if __name__ == "__main__":
     unittest.main()

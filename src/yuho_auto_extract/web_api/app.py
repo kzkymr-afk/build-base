@@ -134,6 +134,7 @@ class PromptRequest(BaseModel):
 class MappingReviewDecisionRequest(BaseModel):
     reviewer: str = ""
     note: str = ""
+    preview: bool = False
 
 
 class ConceptUpdateRequest(BaseModel):
@@ -156,6 +157,7 @@ class ReconciliationApplyRequest(BaseModel):
     corrected_value: Any = ""
     reviewer_note: str = ""
     reviewer: str = ""
+    preview: bool = False
 
 
 @app.get("/api/status")
@@ -619,6 +621,7 @@ def apply_reconciliation_group(request: ReconciliationApplyRequest) -> Dict[str,
             corrected_value=request.corrected_value,
             reviewer_note=request.reviewer_note,
             reviewer=request.reviewer,
+            preview=request.preview,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -644,7 +647,11 @@ def mapping_proposals(
 
 @app.post("/api/mappings/bulk-reject-conflicts")
 def bulk_reject_conflicts(request: MappingReviewDecisionRequest = Body(default=MappingReviewDecisionRequest())) -> Dict[str, Any]:
-    return mapping_review.bulk_reject_conflicting_proposals(PROJECT_ROOT, reviewer=request.reviewer or "web")
+    return mapping_review.bulk_reject_conflicting_proposals(
+        PROJECT_ROOT,
+        reviewer=request.reviewer or "web",
+        preview=request.preview,
+    )
 
 
 @app.get("/api/mappings/conflict-summary")

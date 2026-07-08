@@ -125,6 +125,42 @@ class ReconciliationTests(unittest.TestCase):
             self.assertTrue(all(row["review_decision"] == "accept" for row in resolved))
             self.assertTrue(all(row["reviewer_note"] == "group checked" for row in resolved))
 
+    def test_apply_group_preview_does_not_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "building_orders_total",
+                        "extracted_value": "100",
+                        "review_reason": "identity_group_mismatch:sum_building_orders",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "building_orders_private",
+                        "extracted_value": "60",
+                        "review_reason": "identity_group_mismatch:sum_building_orders",
+                    },
+                ],
+            )
+
+            result = reconciliation.apply_reconciliation_group(
+                root,
+                "identity_group_mismatch:sum_building_orders",
+                decision="accept",
+                reviewer_note="group checked",
+                reviewer="tester",
+                preview=True,
+            )
+
+            self.assertTrue(result["preview"])
+            self.assertEqual(result["target_count"], 2)
+            self.assertEqual(result["applied_items"], 0)
+            self.assertEqual(len(result["targets"]), 2)
+            self.assertFalse((root / "data" / "review" / "review_resolved.csv").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,10 +69,12 @@ import {
   type GoldenSummary,
   type Job,
   type LegendPosition,
+  type MappingBulkRejectResult,
   type MappingProposal,
   type MappingProposalsResult,
   type Options,
   type Page,
+  type ReconciliationApplyResult,
   type ReconciliationGroupsResult,
   type RegressionSummary,
   type ReviewTarget,
@@ -5009,13 +5011,38 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
     setSaving(true);
     setMessage('');
     try {
-      const result = await api<{ applied_items: number; total: number }>('/api/reconciliation/apply', {
+      const preview = await api<ReconciliationApplyResult>('/api/reconciliation/apply', {
         method: 'POST',
         body: JSON.stringify({
           group_id: selected.group_id,
           decision: 'accept',
           reviewer_note: note || `checked reconciliation group: ${selected.rule_id}`,
           reviewer: 'web',
+          preview: true,
+        }),
+      });
+      if (preview.target_count === 0) {
+        setMessage('このグループで保存できる対象は0件です。');
+        return;
+      }
+      const samples = (preview.targets || []).slice(0, 5).map((row) => (
+        `・${String(row.company_year_id || '')} / ${String(row.field_name_ja || row.field_id || '')} / ${String(row.extracted_value || row.existing_value || '-')}`
+      )).join('\n');
+      const ok = window.confirm(
+        `照合グループ ${selected.rule_id} の${preview.target_count}件をaccept保存します。\n\n対象例:\n${samples}\n\n保存後、最終表へ反映するにはレビュー反映が必要です。実行しますか？`
+      );
+      if (!ok) {
+        setMessage(`保存は実行していません。候補${preview.target_count}件を確認しました。`);
+        return;
+      }
+      const result = await api<ReconciliationApplyResult>('/api/reconciliation/apply', {
+        method: 'POST',
+        body: JSON.stringify({
+          group_id: selected.group_id,
+          decision: 'accept',
+          reviewer_note: note || `checked reconciliation group: ${selected.rule_id}`,
+          reviewer: 'web',
+          preview: false,
         }),
       });
       setMessage(`保存しました: ${result.applied_items}件 / resolved合計 ${result.total}件`);
@@ -5123,12 +5150,33 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
   }, [actionFilter, kindFilter, verdictFilter, onError]);
 
   async function bulkRejectConflicts() {
-    if (!window.confirm('数値照合で明確に不一致（一致率10%以下）のmap提案を一括却下します。既存の確定判断は変更しません。実行しますか？')) return;
-    setMessage('一括却下を実行中...');
+    setMessage('一括却下候補を確認中...');
     try {
-      const r = await api<{ rejected: number; candidates: number }>('/api/mappings/bulk-reject-conflicts', {
+      const preview = await api<MappingBulkRejectResult>('/api/mappings/bulk-reject-conflicts', {
         method: 'POST',
-        body: JSON.stringify({ reviewer: 'web_ui' }),
+        body: JSON.stringify({ reviewer: 'web_ui', preview: true }),
+      });
+      if (preview.candidates === 0) {
+        setMessage('一括却下の対象は0件です。表示中の「セル判定の矛盾」とは別集計です。');
+        return;
+      }
+      const samples = preview.examples.slice(0, 5).map((example) => {
+        const observed = example.label_ja || example.element_local_name || example.mapping_id || '(有報項目不明)';
+        const concept = example.concept_name_ja || example.concept_id || '(表の項目不明)';
+        const rate = typeof example.match_rate === 'number' ? `${Math.round(example.match_rate * 100)}%` : '-';
+        return `・${observed} → ${concept} / 重複${example.overlap_count ?? '-'}件 / 一致率${rate}`;
+      }).join('\n');
+      const ok = window.confirm(
+        `対応付け提案の不一致を${preview.candidates}件却下します。\n\n対象例:\n${samples}\n\n既存の確定判断は変更しません。実行しますか？`
+      );
+      if (!ok) {
+        setMessage(`一括却下は実行していません。候補${preview.candidates}件を確認しました。`);
+        return;
+      }
+      setMessage('一括却下を実行中...');
+      const r = await api<MappingBulkRejectResult>('/api/mappings/bulk-reject-conflicts', {
+        method: 'POST',
+        body: JSON.stringify({ reviewer: 'web_ui', preview: false }),
       });
       setMessage(`一括却下しました: ${r.rejected}件（候補${r.candidates}件）`);
       load();
@@ -5207,7 +5255,7 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
             <option value="weak">部分一致</option>
           </select>
           <button type="button" className="secondary danger-action" onClick={bulkRejectConflicts}>
-            矛盾を一括却下（一致率10%以下のmap）
+            対応付け提案の不一致を一括却下
           </button>
         </div>
       </div>

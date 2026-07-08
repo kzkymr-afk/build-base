@@ -360,6 +360,58 @@ class CompanyFactbookTests(unittest.TestCase):
             self.assertEqual(summary["top_no_mapping_categories"][0]["use_category_normalized"], "development_other")
             self.assertEqual(summary["pending_samples"][0]["validation_status"], "no_mapping")
 
+    def test_validate_factbook_respects_zero_tolerance_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(root, parser="none")
+            config_path = root / "config" / "company_factbook_sources.yml"
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            cfg["validation"] = {
+                "absolute_tolerance_million_yen": 0,
+                "relative_tolerance": 0,
+            }
+            config_path.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+            write_table(
+                root / "data" / "marts" / "company_factbooks" / "building_orders_by_category.csv",
+                [
+                    {
+                        "company_id": "TEST",
+                        "company_name": "テスト建設",
+                        "fiscal_year": "2024",
+                        "period_type": "annual",
+                        "source_metric_id": "building_orders_by_business_scope",
+                        "category_type": "business_scope",
+                        "use_category_normalized": "domestic_building",
+                        "use_category_label": "国内建築",
+                        "amount_million_yen": "120000",
+                        "extraction_status": "parsed",
+                    },
+                ],
+            )
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [
+                    {
+                        "company_year_id": "TEST_2024",
+                        "operating_company_id": "TEST",
+                        "fiscal_year": "2024",
+                        "segment_orders_domestic_building": "120050",
+                    }
+                ],
+            )
+            write_table(
+                root / "config" / "field_definition.csv",
+                [{"field_id": "segment_orders_domestic_building", "field_name_ja": "セグメント受注高_国内建築"}],
+            )
+
+            result = company_factbooks.validate_factbook_against_yuho(root)
+
+            self.assertEqual(result["absolute_tolerance_million_yen"], 0.0)
+            self.assertEqual(result["relative_tolerance"], 0.0)
+            self.assertEqual(result["status_counts"]["mismatch"], 1)
+            rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.csv")
+            self.assertEqual(rows[0]["validation_status"], "mismatch")
+
     def test_coverage_counts_business_scope_orders_as_building_order_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

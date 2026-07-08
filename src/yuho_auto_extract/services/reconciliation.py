@@ -66,6 +66,7 @@ def apply_reconciliation_group(
     corrected_value: Any = "",
     reviewer_note: str = "",
     reviewer: str = "",
+    preview: bool = False,
 ) -> Dict[str, Any]:
     group_id = group_id.strip()
     if not group_id.startswith(REASON_PREFIX):
@@ -84,9 +85,21 @@ def apply_reconciliation_group(
     ]
     if not targets:
         raise ValueError(f"reconciliation group not found: {group_id}")
+    if preview:
+        resolved_rows = read_table(root / "data" / "review" / "review_resolved.csv")
+        return {
+            "preview": True,
+            "group_id": group_id,
+            "applied_items": 0,
+            "target_count": len(targets),
+            "total": len(resolved_rows),
+            "targets": targets[:20],
+        }
     result = reviews.upsert_resolved_reviews(root, targets)
+    result["preview"] = False
     result["group_id"] = group_id
     result["applied_items"] = len(targets)
+    result["target_count"] = len(targets)
     return result
 
 

@@ -258,6 +258,7 @@ def bulk_reject_conflicting_proposals(
     reviewer: str = "auto",
     min_overlap: int = 3,
     max_match_rate: float = 0.1,
+    preview: bool = False,
 ) -> Dict[str, Any]:
     """数値照合で明確に不一致（重複>=min_overlap かつ 一致率<=max_match_rate）の
     proposed な map/different_scope 提案を一括却下する。
@@ -279,7 +280,7 @@ def bulk_reject_conflicting_proposals(
     finally:
         conn.close()
     if not proposed:
-        return {"rejected": 0, "candidates": 0, "examples": []}
+        return {"preview": preview, "rejected": 0, "candidates": 0, "examples": []}
 
     dtos = [_proposal_dto(row, observed_items, {}) for row in proposed]
     _attach_corroboration(root, proposed, observed_items, dtos)
@@ -293,8 +294,23 @@ def bulk_reject_conflicting_proposals(
         if overlap >= min_overlap and rate <= max_match_rate:
             candidates.append((row, dto, corr))
 
-    rejected = 0
     examples: List[Dict[str, Any]] = []
+    for row, dto, corr in candidates[:12]:
+        examples.append(
+            {
+                "mapping_id": row.get("mapping_id"),
+                "element_local_name": dto["observed_item"]["element_local_name"],
+                "label_ja": dto["observed_item"].get("label_ja"),
+                "concept_id": row.get("concept_id"),
+                "concept_name_ja": (dto.get("concept") or {}).get("concept_name_ja"),
+                "overlap_count": corr.get("overlap_count"),
+                "match_rate": corr.get("match_rate"),
+            }
+        )
+    if preview:
+        return {"preview": True, "rejected": 0, "candidates": len(candidates), "examples": examples}
+
+    rejected = 0
     conn = semantics_store.connect(root)
     try:
         for row, dto, corr in candidates:
@@ -314,20 +330,11 @@ def bulk_reject_conflicting_proposals(
             )
             if updated:
                 rejected += 1
-                if len(examples) < 12:
-                    examples.append(
-                        {
-                            "element_local_name": dto["observed_item"]["element_local_name"],
-                            "concept_id": row.get("concept_id"),
-                            "overlap_count": corr.get("overlap_count"),
-                            "match_rate": corr.get("match_rate"),
-                        }
-                    )
         if rejected:
             semantics_store.write_csv_mirrors(root, conn)
     finally:
         conn.close()
-    return {"rejected": rejected, "candidates": len(candidates), "examples": examples}
+    return {"preview": False, "rejected": rejected, "candidates": len(candidates), "examples": examples}
 
 
 def read_conflict_summary(root: Path) -> Dict[str, int]:

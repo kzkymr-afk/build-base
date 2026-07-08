@@ -499,8 +499,9 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
     field_rows = _read_optional(root / "data" / "final" / "final_master_field_definition.csv") or _read_optional(root / "config" / "field_definition.csv")
     field_names = {str(row.get("field_id") or ""): str(row.get("field_name_ja") or "") for row in field_rows}
     wide_by_company_year = {str(row.get("company_year_id") or ""): row for row in wide_rows}
-    tolerance_abs = float(((cfg.get("validation") or {}).get("absolute_tolerance_million_yen")) or 100)
-    tolerance_pct = float(((cfg.get("validation") or {}).get("relative_tolerance")) or 0.005)
+    validation_cfg = cfg.get("validation") or {}
+    tolerance_abs = _config_float(validation_cfg, "absolute_tolerance_million_yen", 100)
+    tolerance_pct = _config_float(validation_cfg, "relative_tolerance", 0.005)
 
     validation_rows: List[Dict[str, Any]] = []
     for row in rows:
@@ -1556,6 +1557,13 @@ def _factbook_config(root: Path) -> Dict[str, Any]:
     if not path.exists():
         return {"enabled": False, "sources": []}
     return read_yaml(path)
+
+
+def _config_float(config: Dict[str, Any], key: str, default: float) -> float:
+    value = config.get(key)
+    if value is None or value == "":
+        return float(default)
+    return float(value)
 
 
 def _validate_factbook_row(
