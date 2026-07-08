@@ -191,7 +191,7 @@ const fieldDefinitionColumnLabels: Record<string, string> = {
   category: 'ジャンル',
   category_label: 'ジャンル',
   target_unit: '単位',
-  data_scope_required: 'スコープ',
+  data_scope_required: '範囲',
   period_type: '期間',
   preferred_method: '抽出方法',
   synonyms_ja: '同義語',
@@ -262,7 +262,7 @@ const factbookOrderColumnLabels: Record<string, string> = {
   source_dataset_id: 'データセット',
   source_metric_id: '指標',
   category_type: '分類種別',
-  scope: 'スコープ',
+  scope: '範囲',
   business_scope: '事業範囲',
   use_category_raw: '元分類',
   use_category_normalized: '標準分類',
@@ -373,6 +373,42 @@ function formatConfidence(value: unknown): string {
   return '低';
 }
 
+const TRANSLATED_VALUE_COLUMNS = new Set([
+  'action',
+  'analysis_treatment',
+  'data_scope',
+  'data_scope_allowed',
+  'data_scope_required',
+  'extraction_method',
+  'item_kind',
+  'normalized_scope',
+  'parser_status',
+  'preferred_method',
+  'resolution',
+  'review_decision',
+  'review_reason',
+  'source',
+  'status',
+  'validation_status'
+]);
+
+function formatTermText(value: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (text.includes(';') || text.includes(',')) {
+    return text
+      .split(/[;,]/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => t(part))
+      .join('、');
+  }
+  if (text.startsWith('identity_group_mismatch:')) {
+    return `照合グループ不一致: ${text.slice('identity_group_mismatch:'.length)}`;
+  }
+  return t(text);
+}
+
 function renderClampedText(value: unknown, className = '') {
   const text = String(value ?? '');
   return <span className={`clamped-cell ${className}`.trim()} title={text}>{text}</span>;
@@ -396,6 +432,9 @@ function renderCellValue(column: string, value: unknown) {
   }
   if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
     return renderClampedText(JSON.stringify(value));
+  }
+  if (TRANSLATED_VALUE_COLUMNS.has(column)) {
+    return formatTermText(value);
   }
   return String(value ?? '');
 }
@@ -510,7 +549,7 @@ function App() {
           <span className="brand-mark">B</span>
           <div>
             <strong>BuildBase</strong>
-            <small>Construction Data Workbench</small>
+            <small>建設データ確認ツール</small>
           </div>
         </div>
         <nav className="nav-groups">
@@ -532,7 +571,7 @@ function App() {
         </nav>
         <div className="status-box">
           <span className={`dot ${job?.status === 'running' ? 'running' : job?.status === 'failed' ? 'failed' : 'ok'}`} />
-          <span>{job?.status || 'idle'}</span>
+          <span>{formatTermText(job?.status || 'idle')}</span>
         </div>
       </aside>
       <main>
@@ -1222,7 +1261,7 @@ function JobLog({ job }: { job: Job | null }) {
     <div className="panel">
       <div className="panel-head">
         <h2>{job.name}</h2>
-        <span className={`badge ${job.status}`}>{job.status}</span>
+        <span className={`badge ${job.status}`}>{formatTermText(job.status)}</span>
       </div>
       {job.error && <p className="error-text">{job.error}</p>}
       <pre className="log">{job.logs.join('\n') || 'ログ待機中...'}</pre>
@@ -1246,7 +1285,7 @@ function ReviewTerminal({ job }: { job: Job | null }) {
           <h2>作業ログ</h2>
           <p className="muted">再取得、最終反映の進捗をここで確認できます。</p>
         </div>
-        <span className={`badge ${job?.status || ''}`}>{job?.status || 'idle'}</span>
+        <span className={`badge ${job?.status || ''}`}>{formatTermText(job?.status || 'idle')}</span>
       </div>
       {job?.error && <p className="error-text">{job.error}</p>}
       <pre className="log review-terminal-log" ref={logRef}>
@@ -1521,12 +1560,12 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
         </div>
         <div className="toolbar">
           <input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="項目ID・名称・カテゴリ検索" />
-          <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
-            <option value="">全status</option>
-            <option value="active">active</option>
-            <option value="merged">merged</option>
-            <option value="retired">retired</option>
-          </select>
+            <select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}>
+              <option value="">全状態</option>
+              <option value="active">有効</option>
+              <option value="merged">統合済み</option>
+              <option value="retired">廃止</option>
+            </select>
           <button className="ghost" onClick={load}>再読込</button>
         </div>
         {message && <div className="notice">{message}</div>}
@@ -1537,7 +1576,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                 <tr>
                   <th>concept_id</th>
                   <th>名称</th>
-                  <th>status</th>
+                  <th>状態</th>
                   <th>map</th>
                   <th>final</th>
                   <th>単位</th>
@@ -1548,7 +1587,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                   <tr key={row.concept_id} className={row.concept_id === selectedId ? 'selected-row' : ''} onClick={() => selectConcept(row)}>
                     <td className="mono">{row.concept_id}</td>
                     <td>{row.concept_name_ja}</td>
-                    <td><span className={`badge ${row.status === 'active' ? 'succeeded' : 'pending'}`}>{row.status}</span></td>
+                    <td><span className={`badge ${row.status === 'active' ? 'succeeded' : 'pending'}`}>{formatTermText(row.status)}</span></td>
                     <td className="mono">{row.mapping_count}</td>
                     <td><span className={`badge ${row.final_value_count ? 'succeeded' : 'pending'}`}>{row.coverage_hint || `${row.final_value_count || 0}件`}</span></td>
                     <td>{row.target_unit}</td>
@@ -1569,22 +1608,22 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                 <h3>{selected.concept_id}</h3>
                 <div className="detail-grid">
                   <div><small>final実値</small><strong>{selected.coverage_hint || `${selected.final_value_count || 0}件`}</strong></div>
-                  <div><small>confirmed map</small><strong>{selected.confirmed_mapping_count}</strong></div>
-                  <div><small>proposed map</small><strong>{selected.proposed_mapping_count}</strong></div>
+                  <div><small>確定済み対応</small><strong>{selected.confirmed_mapping_count}</strong></div>
+                  <div><small>提案中対応</small><strong>{selected.proposed_mapping_count}</strong></div>
                 </div>
                 <label>名称<input value={draft.concept_name_ja || ''} onChange={(event) => setDraft({ ...draft, concept_name_ja: event.target.value })} /></label>
                 <label>カテゴリ<input value={draft.category || ''} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
                 <div className="inline-fields">
-                  <label>scope<input value={draft.data_scope || ''} onChange={(event) => setDraft({ ...draft, data_scope: event.target.value })} /></label>
-                  <label>unit<input value={draft.target_unit || ''} onChange={(event) => setDraft({ ...draft, target_unit: event.target.value })} /></label>
+                  <label>範囲<input value={draft.data_scope || ''} onChange={(event) => setDraft({ ...draft, data_scope: event.target.value })} /></label>
+                  <label>単位<input value={draft.target_unit || ''} onChange={(event) => setDraft({ ...draft, target_unit: event.target.value })} /></label>
                 </div>
                 <div className="inline-fields">
-                  <label>period<input value={draft.period_type || ''} onChange={(event) => setDraft({ ...draft, period_type: event.target.value })} /></label>
-                  <label>status
+                  <label>期間<input value={draft.period_type || ''} onChange={(event) => setDraft({ ...draft, period_type: event.target.value })} /></label>
+                  <label>状態
                     <select value={draft.status || 'active'} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>
-                      <option value="active">active</option>
-                      <option value="merged">merged</option>
-                      <option value="retired">retired</option>
+                      <option value="active">有効</option>
+                      <option value="merged">統合済み</option>
+                      <option value="retired">廃止</option>
                     </select>
                   </label>
                 </div>
@@ -1800,22 +1839,22 @@ function FieldAdminPanel({ onUpdated }: { onUpdated: () => void }) {
                   <input value={draft.target_unit || ''} onChange={(e) => setDraftValue('target_unit', e.target.value)} />
                 </label>
                 <label>
-                  <span>スコープ</span>
+                  <span>範囲</span>
                   <select value={draft.data_scope_required || ''} onChange={(e) => setDraftValue('data_scope_required', e.target.value)}>
                     <option value="">未設定</option>
-                    <option value="consolidated">consolidated</option>
-                    <option value="standalone">standalone</option>
-                    <option value="segment">segment</option>
-                    <option value="permit_entity">permit_entity</option>
+                    <option value="consolidated">連結</option>
+                    <option value="standalone">単独</option>
+                    <option value="segment">セグメント</option>
+                    <option value="permit_entity">許認可主体</option>
                   </select>
                 </label>
                 <label>
                   <span>期間</span>
                   <select value={draft.period_type || ''} onChange={(e) => setDraftValue('period_type', e.target.value)}>
                     <option value="">未設定</option>
-                    <option value="current_year">current_year</option>
-                    <option value="period_end">period_end</option>
-                    <option value="duration">duration</option>
+                    <option value="current_year">当期</option>
+                    <option value="period_end">期末時点</option>
+                    <option value="duration">期間累計</option>
                   </select>
                 </label>
                 <label>
@@ -1956,7 +1995,7 @@ function CellDetailPanel({
   const mappingRows = (detail.mapping_state?.mappings as Row[] | undefined) || [];
   const proposedMappings = mappingRows.filter((row) => String(row.status || '') === 'proposed');
 
-  async function saveReview(nextDecision = decision, nextValue = correctedValue, options: { applyAfterSave?: boolean } = { applyAfterSave: true }) {
+  async function saveReview(nextDecision = decision, nextValue = correctedValue, options: { applyAfterSave?: boolean; candidateId?: string } = { applyAfterSave: true }) {
     if (!detail) return;
     if (jobRunning) {
       setPanelError('ジョブ実行中です。完了後に保存してください。');
@@ -1981,7 +2020,8 @@ function CellDetailPanel({
           review_decision: nextDecision,
           corrected_value: nextDecision === 'correct' ? nextValue : '',
           reviewer_note: note,
-          reviewer: 'web_cell_workbench'
+          reviewer: 'web_cell_workbench',
+          candidate_id: options.candidateId || ''
         })
       });
       setInferredSuggestion(result.inferred_source_suggestion || null);
@@ -2148,8 +2188,8 @@ function CellDetailPanel({
     <div className="panel cell-detail cell-workbench">
       <div className="panel-head">
         <div>
-          <h2>Cell Workbench: {detail.field_name_ja}</h2>
-          <p className="muted">{detail.company_year_id} / {detail.field_id}</p>
+          <h2>セル作業: {detail.field_name_ja}</h2>
+          <p className="muted">対象: {detail.company_id} {detail.fiscal_year}年度 / 項目ID {detail.field_id}</p>
         </div>
         <span className={`badge status-${detail.status}`}>{detail.status_label}</span>
       </div>
@@ -2172,12 +2212,12 @@ function CellDetailPanel({
           <strong>{detail.unit || '-'}</strong>
         </div>
         <div>
-          <small>必要スコープ</small>
-          <strong>{detail.data_scope_required || '-'}</strong>
+          <small>必要範囲</small>
+          <strong>{formatTermText(detail.data_scope_required) || '-'}</strong>
         </div>
         <div>
           <small>抽出方式</small>
-          <strong>{detail.preferred_method || '-'}</strong>
+          <strong>{formatTermText(detail.preferred_method) || '-'}</strong>
         </div>
       </div>
 
@@ -2228,14 +2268,14 @@ function CellDetailPanel({
                   key={`${candidate.candidate_id || index}`}
                   onClick={() => {
                     const value = String(candidate.value || '');
-                    setDecision('correct');
+                    setDecision('accept');
                     setCorrectedValue(value);
-                    void saveReview('correct', value, { applyAfterSave: true });
+                    void saveReview('accept', '', { applyAfterSave: true, candidateId: String(candidate.candidate_id || '') });
                   }}
                   disabled={busy === 'review' || busy === 'review-apply' || jobRunning}
                 >
                   <strong>{String(candidate.value || '-')}</strong>
-                  <span>{String(candidate.source || '')} / {String(candidate.reason || '')}</span>
+                  <span>{formatTermText(candidate.source)} / {formatTermText(candidate.reason)}</span>
                 </button>
               ))}
             </div>
@@ -2315,8 +2355,8 @@ function CellDetailPanel({
               return (
                 <div className="mapping-action" key={mappingId}>
                   <div>
-                    <strong>{String(mapping.action || '')} → {String(mapping.concept_id || '')}</strong>
-                    <span>{String(mapping.observed_item_id || '')} / confidence {String(mapping.confidence || '-')}</span>
+                    <strong>{formatTermText(mapping.action)} → {String(mapping.concept_id || '')}</strong>
+                    <span>{String(mapping.observed_item_id || '')} / 信頼度 {formatConfidence(mapping.confidence)}</span>
                   </div>
                   <div className="toolbar">
                     <button type="button" className="secondary" onClick={() => decideMapping(mappingId, 'confirm')} disabled={busy === mappingId}>承認</button>
@@ -3419,7 +3459,7 @@ function ReviewCategorySummary({
       <div className="panel-head">
         <div>
           <h2>レビュー内訳</h2>
-          <p className="muted">未対応が増えた時は、まずこの内訳で「未取得」「検算」「スコープ」「警告」のどれが残っているかを見ます。</p>
+          <p className="muted">未対応が増えた時は、まずこの内訳で「未取得」「検算」「範囲」「警告」のどれが残っているかを見ます。</p>
         </div>
       </div>
       <div className="review-category-grid">
@@ -5102,11 +5142,11 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
               <div>
                 <h3>{p.observed_item.label_ja || p.observed_item.element_local_name || p.observed_item.observed_item_id}</h3>
                 <p className="muted">
-                  {p.observed_item.element_id} / scope={p.observed_item.normalized_scope || '-'} / unit={p.observed_item.unit || '-'} / {p.observed_item.taxonomy_kind}
+                  {p.observed_item.element_id} / 範囲={formatTermText(p.observed_item.normalized_scope) || '-'} / 単位={p.observed_item.unit || '-'} / {p.observed_item.taxonomy_kind}
                 </p>
               </div>
               <span className={`badge ${p.decided_by_kind === 'ai' ? 'pending' : 'succeeded'}`}>
-                {p.decided_by_kind === 'ai' ? 'AI提案' : '決定的一致'}{p.confidence != null ? `(${p.confidence})` : ''}
+                {p.decided_by_kind === 'ai' ? 'AI提案' : '決定的一致'}{p.confidence != null ? `（信頼度 ${formatConfidence(p.confidence)}）` : ''}
               </span>
             </div>
             <div className="grid">
@@ -5480,7 +5520,7 @@ function MiniRows({ title, rows, columns, emptyMessage }: {
 const miniColumnLabels: Record<string, string> = {
   value: '値',
   unit_normalized: '単位',
-  data_scope: 'スコープ',
+  data_scope: '範囲',
   source_heading: '見出し',
   source_quote: '引用',
   validation_status: '検証',
@@ -5497,11 +5537,14 @@ const miniColumnLabels: Record<string, string> = {
   resolution: '確定した数値',
   corroboration_count: '数値照合の件数',
   conflict_count: '不一致の件数',
+  buckets: '照合元の種類',
+  sources: '照合元',
+  decided_at_utc: '判定日時',
   observed_item_id: '有報の項目ID',
   item_kind: '種類',
   element_id: '要素ID',
   label_ja: '名称',
-  normalized_scope: 'スコープ',
+  normalized_scope: '範囲',
   source: '出典',
   mapping_id: '対応付けID',
   concept_id: '表の項目ID',
@@ -5525,7 +5568,7 @@ const sourceSummaryColumnLabels: Record<string, string> = {
   value: '値',
   unit: '単位',
   unit_normalized: '単位',
-  data_scope: 'スコープ',
+  data_scope: '範囲',
   source_file: '出典ファイル',
   source_heading: '見出し',
   source_quote: '引用',

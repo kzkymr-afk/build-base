@@ -322,6 +322,96 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(resolved[0]["review_decision"], "correct")
             self.assertEqual(resolved[0]["corrected_value"], "8.2")
 
+    def test_cell_review_accepts_selected_review_queue_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "data" / "review" / "review_queue.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "company_name": "A",
+                        "fiscal_year": "2024",
+                        "field_id": "roe",
+                        "field_name_ja": "ROE",
+                        "extracted_value": "0.11",
+                        "source_quote": "first candidate",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "company_name": "A",
+                        "fiscal_year": "2024",
+                        "field_id": "roe",
+                        "field_name_ja": "ROE",
+                        "extracted_value": "0.12",
+                        "source_quote": "second candidate",
+                    },
+                ],
+            )
+
+            result = cells.save_cell_review(
+                root,
+                "A_2024",
+                "roe",
+                review_decision="accept",
+                reviewer_note="picked visible candidate",
+                candidate_id="review:1",
+            )
+
+            self.assertEqual(result["changed"], 1)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual(resolved[0]["review_decision"], "accept")
+            self.assertEqual(resolved[0]["extracted_value"], "0.12")
+            self.assertEqual(resolved[0]["source_quote"], "second candidate")
+            self.assertIn("selected_candidate=review:1", resolved[0]["reviewer_note"])
+
+    def test_cell_review_accepts_selected_source_audit_candidate_when_queue_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": ""}],
+            )
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "roe",
+                        "value": "0.11",
+                        "unit_normalized": "%",
+                        "source_doc_id": "doc-first",
+                        "source_quote": "first audit candidate",
+                    },
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "roe",
+                        "value": "0.12",
+                        "unit_normalized": "%",
+                        "source_doc_id": "doc-second",
+                        "source_quote": "second audit candidate",
+                    },
+                ],
+            )
+
+            result = cells.save_cell_review(
+                root,
+                "A_2024",
+                "roe",
+                review_decision="accept",
+                candidate_id="audit:1",
+            )
+
+            self.assertEqual(result["changed"], 1)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")
+            self.assertEqual(resolved[0]["review_decision"], "accept")
+            self.assertEqual(resolved[0]["extracted_value"], "0.12")
+            self.assertEqual(resolved[0]["source_doc_id"], "doc-second")
+            self.assertEqual(resolved[0]["source_quote"], "second audit candidate")
+            self.assertIn("selected_candidate=audit:1", resolved[0]["reviewer_note"])
+
     def test_apply_similar_reviews_previews_before_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -791,7 +881,7 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(detail["status"], "blank_with_review_candidate")
             self.assertTrue(detail["has_review_candidate"])
             self.assertEqual(detail["field_name_ja"], "ROE")
-            self.assertIn("Cell Workbench", detail["next_action"])
+            self.assertIn("セル作業", detail["next_action"])
 
     def test_cell_detail_uses_same_corroboration_status_as_wide_result(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -611,7 +611,7 @@ def _apply_corroboration_status(
         "corroboration_needs_review",
         "照合要確認",
         "最終結果に値がありますが、照合結果が自動確定条件を満たしていません。",
-        "候補・根拠チェーン・source_audit を確認し、妥当ならこの値を維持、違う場合はこのセルから修正してください。",
+        "候補と根拠チェーンを確認し、妥当ならこの値を維持、違う場合はこのセルから修正してください。",
     )
 
 
@@ -1053,15 +1053,15 @@ def _classify_cell(
     if not _is_blank(value):
         if has_audit:
             return (
-                "value_present",
-                "値あり",
-                "最終結果に値が入っています。source_audit.csv に根拠もあります。",
-                "値の妥当性を確認したい場合は、根拠タブで出典を確認してください。",
-            )
+            "value_present",
+            "値あり",
+            "最終結果に値が入っています。抽出根拠もあります。",
+            "値の妥当性を確認したい場合は、根拠タブで出典を確認してください。",
+        )
         return (
             "value_present_no_audit",
             "値あり・根拠未検出",
-            "最終結果に値はありますが、このセルに対応する source_audit.csv の行が見つかりません。",
+            "最終結果に値はありますが、このセルに対応する抽出根拠が見つかりません。",
             "値の由来を追いたい場合は、抽出処理の監査ログ生成を確認してください。",
         )
     if failure_reason:
@@ -1083,28 +1083,28 @@ def _classify_cell(
             "review_saved_not_applied",
             "レビュー保存済み",
             "review_resolved.csv に保存済みの判断がありますが、最終結果はまだ空欄です。",
-            "このセルの保存内容を確認し、Cell Workbench から最終表への反映を実行してください。",
+            "このセルの保存内容を確認し、セル作業から最終表への反映を実行してください。",
         )
     if any(not _is_blank(row.get("extracted_value", "")) for row in review_rows):
         return (
             "blank_with_review_candidate",
             "レビュー候補あり",
             "抽出候補がありますが、自動採用されずレビュー待ちになっています。",
-            "Cell Workbench で候補を確認し、「この値で最終表を更新」または「手入力で修正」を実行してください。",
+            "セル作業で候補を確認し、「この値で最終表を更新」または「手入力で修正」を実行してください。",
         )
     if has_audit:
         return (
             "blank_with_source_audit",
             "根拠候補あり",
             "監査行はありますが、最終結果は空欄です。検証結果やスコープ判定で落ちた可能性があります。",
-            "根拠タブで validation_status、data_scope、source_quote を確認し、必要ならレビューまたは抽出ルールを調整してください。",
+            "根拠タブで検算状態、範囲、引用を確認し、必要ならレビューまたは抽出ルールを調整してください。",
         )
     if review_rows:
         return (
             "blank_review_needs_rule",
             "候補なし・要ルール確認",
             "レビューキューには載っていますが、抽出値が空です。タグ未検出や信頼度不足の可能性があります。",
-            "review_reason を確認し、XBRLタグ候補、表パターン、セクション抽出条件の追加対象にしてください。",
+            "レビュー理由を確認し、XBRLタグ候補、表パターン、セクション抽出条件の追加対象にしてください。",
         )
     return (
         "blank_no_candidate",

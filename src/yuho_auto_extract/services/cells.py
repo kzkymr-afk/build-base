@@ -5,11 +5,11 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from yuho_auto_extract.io_utils import read_table
 from yuho_auto_extract.review_queue import REVIEW_COLUMNS
-from yuho_auto_extract.services import field_admin, mapping_review, reviews, semantics_concepts, source_inference
+from yuho_auto_extract.services import field_admin, mapping_review, semantics_concepts, source_inference
 
 
 VALID_REVIEW_DECISIONS = {"accept", "correct", "reject", "not_applicable"}
@@ -31,6 +31,7 @@ def save_cell_review(
     corrected_value: Any = "",
     reviewer_note: str = "",
     reviewer: str = "web_cell_workbench",
+    candidate_id: str = "",
 ) -> Dict[str, Any]:
     row = {
         "company_year_id": company_year_id,
@@ -48,18 +49,27 @@ def save_cell_review(
     if review_decision == "correct" and str(corrected_value).strip() == "":
         raise ValueError("corrected_value is required when review_decision is correct")
 
-    queue_rows = read_table(root / "data" / "review" / "review_queue.csv")
-    queue_row = next((queue_row for queue_row in queue_rows if _key(queue_row) == key), None)
-    if queue_row is not None:
-        if review_decision == "accept" and str(queue_row.get("extracted_value", "")).strip() == "":
+    queue_rows = [row for row in read_table(root / "data" / "review" / "review_queue.csv") if _key(row) == key]
+    audit_rows = [
+        row
+        for row in read_table(root / "data" / "final" / "source_audit.csv")
+        if str(row.get("company_year_id", "")) == key[0] and str(row.get("field_id", "")) == key[1]
+    ]
+    candidate_kind, candidate_index = _parse_candidate_id(candidate_id)
+    selected_queue_row = _candidate_row(queue_rows, candidate_kind, candidate_index, "review")
+    selected_audit_row = _candidate_row(audit_rows, candidate_kind, candidate_index, "audit")
+
+    if selected_queue_row is not None:
+        if review_decision == "accept" and str(selected_queue_row.get("extracted_value", "")).strip() == "":
             raise ValueError("extracted_value is required when review_decision is accept")
-        result = reviews.upsert_resolved_reviews(root, [row])
-        resolved_value = corrected_value if review_decision == "correct" else queue_row.get("extracted_value", "")
-        unit = queue_row.get("unit_normalized", "") or ""
+        resolved = _resolved_row_from_base(selected_queue_row, row, _candidate_note(reviewer_note, candidate_id, "review_queue"))
+        result = _upsert_resolved_rows(root, [resolved])
+        resolved_value = corrected_value if review_decision == "correct" else selected_queue_row.get("extracted_value", "")
+        unit = selected_queue_row.get("unit_normalized", "") or ""
         _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, unit)
         return result
 
-    base = _synthetic_review_row(root, key[0], key[1])
+    base = _synthetic_review_row(root, key[0], key[1], audit_row=selected_audit_row or {})
     if review_decision == "accept" and str(base.get("extracted_value", "")).strip() == "":
         raise ValueError("extracted_value is required when review_decision is accept")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -67,7 +77,7 @@ def save_cell_review(
         {
             "review_decision": review_decision,
             "corrected_value": corrected_value,
-            "reviewer_note": reviewer_note,
+            "reviewer_note": _candidate_note(reviewer_note, candidate_id, "source_audit" if selected_audit_row is not None else ""),
             "reviewer": reviewer,
             "reviewed_at": now,
             "applied_status": "",
@@ -81,6 +91,57 @@ def save_cell_review(
     unit = base.get("unit_normalized", "") or ""
     _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, unit)
     return result
+
+
+def _parse_candidate_id(candidate_id: str) -> Tuple[str, Optional[int]]:
+    if not candidate_id or ":" not in candidate_id:
+        return "", None
+    kind, raw_index = candidate_id.split(":", 1)
+    try:
+        return kind.strip(), int(raw_index)
+    except ValueError:
+        raise ValueError(f"invalid candidate_id: {candidate_id}") from None
+
+
+def _candidate_row(rows: Sequence[Dict[str, Any]], candidate_kind: str, candidate_index: Optional[int], expected_kind: str) -> Optional[Dict[str, Any]]:
+    if candidate_kind and candidate_kind != expected_kind:
+        return None
+    if candidate_index is not None:
+        if candidate_index < 0 or candidate_index >= len(rows):
+            raise ValueError(f"candidate_id not found: {expected_kind}:{candidate_index}")
+        return rows[candidate_index]
+    return rows[0] if rows else None
+
+
+def _candidate_note(reviewer_note: str, candidate_id: str, candidate_source: str) -> str:
+    note = reviewer_note.strip()
+    if not candidate_id:
+        return note
+    suffix = f"selected_candidate={candidate_id}"
+    if candidate_source:
+        suffix = f"{suffix}; candidate_source={candidate_source}"
+    return f"{note}; {suffix}" if note else suffix
+
+
+def _resolved_row_from_base(base: Dict[str, Any], decision_row: Dict[str, Any], reviewer_note: str) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    resolved = {column: "" for column in REVIEW_COLUMNS}
+    resolved.update({column: base.get(column, "") for column in REVIEW_COLUMNS})
+    resolved.update(
+        {
+            "company_year_id": decision_row.get("company_year_id", ""),
+            "field_id": decision_row.get("field_id", ""),
+            "review_decision": decision_row.get("review_decision", ""),
+            "corrected_value": decision_row.get("corrected_value", ""),
+            "reviewer_note": reviewer_note,
+            "reviewer": decision_row.get("reviewer", ""),
+            "reviewed_at": now,
+            "applied_status": "",
+            "applied_value": "",
+            "applied_at": "",
+        }
+    )
+    return resolved
 
 
 def _attach_inferred_source_suggestion(
@@ -293,7 +354,7 @@ def apply_similar_reviews(
     return {"preview": False, "scope": scope, "target_count": len(targets), "changed": changed, "targets": preview_rows}
 
 
-def _synthetic_review_row(root: Path, company_year_id: str, field_id: str) -> Dict[str, Any]:
+def _synthetic_review_row(root: Path, company_year_id: str, field_id: str, *, audit_row: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     wide_row = next(
         (row for row in read_table(root / "data" / "final" / "final_master_wide.csv") if str(row.get("company_year_id", "")) == company_year_id),
         {},
@@ -302,7 +363,7 @@ def _synthetic_review_row(root: Path, company_year_id: str, field_id: str) -> Di
         (row for row in read_table(root / "config" / "field_definition.csv") if str(row.get("field_id", "")) == field_id),
         {},
     )
-    audit = next(
+    audit = audit_row or next(
         (
             row
             for row in read_table(root / "data" / "final" / "source_audit.csv")

@@ -63,6 +63,6 @@ export const baseColumnLabels: Record<string, string> = {
   operating_company_id: '会社ID',
   operating_company_name: '会社名',
   reporting_entity_id: '開示主体',
-  data_scope_allowed: '対象スコープ',
+  data_scope_allowed: '対象範囲',
   analysis_treatment: '分析上の扱い'
 };

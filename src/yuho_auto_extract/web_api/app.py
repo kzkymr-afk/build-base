@@ -52,6 +52,7 @@ class CellReviewRequest(BaseModel):
     corrected_value: Any = ""
     reviewer_note: str = ""
     reviewer: str = "web_cell_workbench"
+    candidate_id: str = ""
 
 
 class CellFieldNameRequest(BaseModel):
@@ -502,6 +503,7 @@ def save_cell_review(company_year_id: str, field_id: str, request: CellReviewReq
             corrected_value=request.corrected_value,
             reviewer_note=request.reviewer_note,
             reviewer=request.reviewer,
+            candidate_id=request.candidate_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
