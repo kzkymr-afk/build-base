@@ -3,7 +3,7 @@ import time
 import unittest
 from pathlib import Path
 
-from yuho_auto_extract.io_utils import read_table, write_table
+from yuho_auto_extract.io_utils import is_blankish, read_table, write_table
 from yuho_auto_extract.review_queue import build_review_queue
 from yuho_auto_extract.services.ai_prompt import build_prompt
 from yuho_auto_extract.services.datasets import read_cell_detail, read_chart_data, read_options, read_review_queue, read_wide
@@ -1003,6 +1003,23 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(written, path)
             rows = read_table(path)
             self.assertEqual([str(row["review_required"]) for row in rows], ["False", "True"])
+
+    def test_write_parquet_handles_numeric_column_with_blank_cells(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "counts.parquet"
+
+            written = write_table(
+                path,
+                [
+                    {"company_year_id": "A_2024", "corroboration_count": 2},
+                    {"company_year_id": "B_2024", "corroboration_count": ""},
+                ],
+            )
+
+            self.assertEqual(written, path)
+            rows = read_table(path)
+            self.assertEqual(rows[0]["corroboration_count"], 2)
+            self.assertTrue(is_blankish(rows[1]["corroboration_count"]))
 
     def test_review_queue_writes_nan_extracted_value_as_blank(self):
         with tempfile.TemporaryDirectory() as tmp:

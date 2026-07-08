@@ -6,6 +6,7 @@ import importlib.util
 import json
 import math
 import zipfile
+from numbers import Number
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -163,12 +164,20 @@ def _dataframe_for_parquet(pd: Any, rows: List[Record]) -> Any:
     for column in df.columns:
         if str(df[column].dtype) != "object":
             continue
+        raw_values = df[column].tolist()
         values = [value for value in df[column].tolist() if not is_blankish(value)]
+        if any(is_blankish(value) for value in raw_values) and values and all(_is_plain_number(value) for value in values):
+            df[column] = df[column].map(lambda value: None if is_blankish(value) else value)
+            continue
         value_types = {type(value) for value in values}
         has_structured = any(isinstance(value, (dict, list)) for value in values)
         if has_structured or len(value_types) > 1:
             df[column] = df[column].map(_stringify_cell_for_parquet)
     return df
+
+
+def _is_plain_number(value: Any) -> bool:
+    return isinstance(value, Number) and not isinstance(value, bool)
 
 
 def _stringify_cell_for_parquet(value: Any) -> str:
