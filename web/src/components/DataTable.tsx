@@ -24,6 +24,7 @@ export function DataTable({
   markEmptyCells = false,
   cellStatuses,
   clampAllCells = false,
+  formatCellText,
   renderCellValue,
   renderClampedText
 }: {
@@ -42,6 +43,7 @@ export function DataTable({
   markEmptyCells?: boolean;
   cellStatuses?: Record<string, Record<string, CellStatus>>;
   clampAllCells?: boolean;
+  formatCellText?: (column: string, value: unknown) => string;
   renderCellValue: (column: string, value: unknown) => React.ReactNode;
   renderClampedText: (value: unknown, className?: string) => React.ReactNode;
 }) {
@@ -66,7 +68,7 @@ export function DataTable({
           return <span className="empty-cell">空欄</span>;
         }
         if (clampAllCells && column !== 'review_saved' && column !== 'applied_status') {
-          return renderClampedText(rawValue);
+          return renderClampedText(formatCellText ? formatCellText(column, rawValue) : rawValue);
         }
         return renderCellValue(column, rawValue);
       }
@@ -98,7 +100,7 @@ export function DataTable({
       selectionColumn,
       ...valueColumns
     ];
-  }, [columns, columnLabels, markEmptyCells, cellStatuses, baseColumns, clampAllCells, renderCellValue, renderClampedText, selectableRows, selectedRowKeys, getRowKey, onRowSelectionToggle]);
+  }, [columns, columnLabels, markEmptyCells, cellStatuses, baseColumns, clampAllCells, formatCellText, renderCellValue, renderClampedText, selectableRows, selectedRowKeys, getRowKey, onRowSelectionToggle]);
   const table = useReactTable({ data, columns: defs, getCoreRowModel: getCoreRowModel() });
   if (!data.length) return <Empty message="該当する行がありません。" />;
   return (

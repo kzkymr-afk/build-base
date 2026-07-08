@@ -376,6 +376,8 @@ function formatConfidence(value: unknown): string {
 const TRANSLATED_VALUE_COLUMNS = new Set([
   'action',
   'analysis_treatment',
+  'business_scope',
+  'category_type',
   'data_scope',
   'data_scope_allowed',
   'data_scope_required',
@@ -388,6 +390,8 @@ const TRANSLATED_VALUE_COLUMNS = new Set([
   'review_decision',
   'review_reason',
   'source',
+  'source_doc_type',
+  'source_metric_id',
   'status',
   'validation_status'
 ]);
@@ -409,9 +413,40 @@ function formatTermText(value: unknown): string {
   return t(text);
 }
 
+function factbookNextActions(validation: FactbookValidationSummary | null): string[] {
+  const counts = validation?.by_status || {};
+  const actions: string[] = [];
+  if ((counts.no_mapping || 0) > 0) {
+    actions.push(`対応項目なし ${counts.no_mapping}件: 「未対応付け上位」を見て、有報側に同じ粒度の項目を追加するか、対象外として扱うかを決めます。`);
+  }
+  if ((counts.missing_yuho_value || 0) > 0) {
+    actions.push(`有報側の値が空欄 ${counts.missing_yuho_value}件: 結果表で該当セルを開き、候補採用または手入力で補完します。`);
+  }
+  if ((counts.missing_yuho_row || 0) > 0) {
+    actions.push(`有報側の会社年度行なし ${counts.missing_yuho_row}件: 対象会社・年度の有報取得/解決状態を確認します。`);
+  }
+  if ((counts.missing_factbook_value || 0) > 0) {
+    actions.push(`ファクトブック値が数値化不可 ${counts.missing_factbook_value}件: 元表の単位・行見出し・PDF/Excelパーサを確認します。`);
+  }
+  if (!actions.length && (validation?.pending_rows || 0) > 0) {
+    actions.push('未完了行があります。pendingサンプルの理由を見て、対応項目・有報側の値・元表パーサのどこで止まっているか確認します。');
+  }
+  return actions.slice(0, 3);
+}
+
 function renderClampedText(value: unknown, className = '') {
   const text = String(value ?? '');
   return <span className={`clamped-cell ${className}`.trim()} title={text}>{text}</span>;
+}
+
+function formatCellText(column: string, value: unknown): string {
+  if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+    return JSON.stringify(value);
+  }
+  if (TRANSLATED_VALUE_COLUMNS.has(column)) {
+    return formatTermText(value);
+  }
+  return String(value ?? '');
 }
 
 function renderCellValue(column: string, value: unknown) {
@@ -433,10 +468,7 @@ function renderCellValue(column: string, value: unknown) {
   if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
     return renderClampedText(JSON.stringify(value));
   }
-  if (TRANSLATED_VALUE_COLUMNS.has(column)) {
-    return formatTermText(value);
-  }
-  return String(value ?? '');
+  return formatCellText(column, value);
 }
 
 function useOptions() {
@@ -2643,8 +2675,9 @@ function FactbooksPanel({
   const factbookBadgeLabel = status?.last_error_count ? '一部エラー' : factbookHasNoComparableRows ? '未検証' : hasFactbookRows ? 'データあり' : '未取得';
   const validationHasNoComparableRows = Boolean(validation?.rows) && validation?.comparable_rows === 0;
   const validationBadgeClass = validation?.status === 'completed' ? 'succeeded' : validation?.status === 'mismatch' ? 'failed' : 'pending';
-  const validationBadgeLabel = validationHasNoComparableRows ? '照合不可' : validation?.status || '未検証';
+  const validationBadgeLabel = validationHasNoComparableRows ? '照合不可' : formatTermText(validation?.status || '未検証');
   const comparableRate = validation?.rows ? `${(((validation.comparable_rows || 0) / validation.rows) * 100).toFixed(1)}%` : '-';
+  const nextActions = factbookNextActions(validation);
 
   return (
     <section className="stack">
@@ -2708,12 +2741,20 @@ function FactbooksPanel({
           <div className="metric"><small>比較可能</small><strong>{validation?.comparable_rows ?? '-'}</strong></div>
           <div className="metric"><small>比較可能率</small><strong className={validationHasNoComparableRows ? 'text-warn' : ''}>{comparableRate}</strong></div>
           <div className="metric"><small>未完了</small><strong className={validation?.incomplete_rows ? 'text-warn' : 'text-ok'}>{validation?.incomplete_rows ?? '-'}</strong></div>
-          <div className="metric"><small>pending</small><strong>{validation?.pending_rows ?? '-'}</strong></div>
+          <div className="metric"><small>未確認行</small><strong>{validation?.pending_rows ?? '-'}</strong></div>
           {Object.entries(validation?.by_status || {}).slice(0, 4).map(([key, value]) => (
-            <div className="metric" key={key}><small>{key}</small><strong>{value}</strong></div>
+            <div className="metric" key={key}><small>{formatTermText(key)}</small><strong>{value}</strong></div>
           ))}
         </div>
-        <p className="hint">`no_mapping` は有報側の同粒度フィールド未定義、`missing_yuho_value` はフィールド定義はあるが完成表の値が空欄です。用途別受注を無理に総額へ寄せる対応付けは行いません。</p>
+        {nextActions.length > 0 && (
+          <div className="alert">
+            <strong>次に直すこと</strong>
+            <ul className="compact-list">
+              {nextActions.map((action) => <li key={action}>{action}</li>)}
+            </ul>
+          </div>
+        )}
+        <p className="hint">「対応項目なし」は有報側に同じ粒度の項目が未定義、「有報側の値が空欄」は項目定義はあるが完成表の値が未入力です。用途別受注を無理に総額へ寄せる対応付けは行いません。</p>
         <div className="grid two">
           <div>
             <h3>未対応付け上位</h3>
@@ -2734,7 +2775,7 @@ function FactbooksPanel({
             />
           </div>
         </div>
-        <h3>pendingサンプル</h3>
+        <h3>未確認サンプル</h3>
         <DataTable
           data={validation?.pending_samples || []}
           columns={['company_name', 'fiscal_year', 'validation_status', 'validation_message', 'source_metric_id', 'category_type', 'use_category_label', 'factbook_amount_million_yen', 'yuho_field_id', 'source_quote']}
@@ -2772,7 +2813,7 @@ function FactbooksPanel({
         </label>
         <input value={search} onChange={(e) => resetPage(() => setSearch(e.target.value))} placeholder="分類・資料名・URLを検索" />
       </FilterBar>
-      <p className="hint">用途別は `category_type=use`、清水の建築/土木等の区分は `business_scope` として分けて保存します。グラフタブではデータ種別を「ファクトブック受注」に切り替えてください。</p>
+      <p className="hint">用途別は「用途別」、清水の建築/土木等の区分は「建築/土木等」として分けて保存します。グラフタブではデータ種別を「ファクトブック受注」に切り替えてください。</p>
       {optionsError && <InlineError message={optionsError} />}
       {error && <InlineError message={error} />}
       <div className="panel">
@@ -5473,11 +5514,12 @@ function notApplicableRange(scope: string, fiscalYear: number | null): { startYe
   return { startYear: fiscalYear, endYear: null, label: `${fiscalYear}年度以降` };
 }
 
-function DataTable(props: Omit<React.ComponentProps<typeof BaseDataTable>, 'baseColumns' | 'renderCellValue' | 'renderClampedText'>) {
+function DataTable(props: Omit<React.ComponentProps<typeof BaseDataTable>, 'baseColumns' | 'formatCellText' | 'renderCellValue' | 'renderClampedText'>) {
   return (
     <BaseDataTable
       {...props}
       baseColumns={baseColumns}
+      formatCellText={formatCellText}
       renderCellValue={renderCellValue}
       renderClampedText={renderClampedText}
     />
