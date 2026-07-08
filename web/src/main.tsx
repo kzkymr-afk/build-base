@@ -752,6 +752,14 @@ function HomeDashboardPanel({
           <small>レビュー残</small>
           <strong>{automation?.review_gate.active_review_items ?? '-'}</strong>
           <span>未反映 {automation?.review_gate.saved_unapplied_reviews ?? '-'}</span>
+          <div className="mini-action-row">
+            <button className="ghost mini-action" onClick={() => onNavigateToResults({ cell_status: 'blank_with_review_candidate' })}>
+              レビュー候補を見る
+            </button>
+            <button className="ghost mini-action" onClick={() => onNavigateToResults({ cell_status: 'review_saved_not_applied' })}>
+              未反映を見る
+            </button>
+          </div>
         </div>
         <div className="panel metric-panel">
           <small>根拠弱い値</small>
@@ -803,7 +811,14 @@ function HomeDashboardPanel({
           </div>
         </div>
       </div>
-      <CorroborationSummaryPanel job={job} onJob={onJob} onError={onError} jobRunning={jobRunning} refreshToken={refreshToken} />
+      <CorroborationSummaryPanel
+        job={job}
+        onJob={onJob}
+        onError={onError}
+        jobRunning={jobRunning}
+        refreshToken={refreshToken}
+        onNavigateToResults={onNavigateToResults}
+      />
       <ReviewTerminal job={job} />
     </section>
   );
@@ -5359,12 +5374,13 @@ function AlgorithmAuditFindingsPanel({ onError, refreshToken }: { onError: (mess
   );
 }
 
-function CorroborationSummaryPanel({ job, onJob, onError, jobRunning, refreshToken }: {
+function CorroborationSummaryPanel({ job, onJob, onError, jobRunning, refreshToken, onNavigateToResults }: {
   job: Job | null;
   onJob: (job: Job) => void;
   onError: (message: string) => void;
   jobRunning: boolean;
   refreshToken: number;
+  onNavigateToResults?: (target: ResultsFilterTarget) => void;
 }) {
   const [summary, setSummary] = React.useState<CorroborationSummary | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -5445,6 +5461,11 @@ function CorroborationSummaryPanel({ job, onJob, onError, jobRunning, refreshTok
               <small>矛盾</small>
               <strong className="text-warn">{summary?.conflicts ?? '-'}</strong>
               <small>{corroborationPercent(summary?.conflicts, summary?.cells_total)}</small>
+              {onNavigateToResults && (
+                <button className="ghost mini-action" onClick={() => onNavigateToResults({ cell_status: 'corroboration_conflicted' })}>
+                  該当セルを見る
+                </button>
+              )}
             </div>
             <div className="metric">
               <small>自動確定かつ照合0件</small>
