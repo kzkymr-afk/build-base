@@ -152,6 +152,13 @@ button.ghost:hover:not(:disabled) {
   box-shadow: 0 8px 20px rgba(25, 33, 41, 0.08);
 }
 
+.mini-action {
+  justify-self: start;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 input,
 select,
 textarea {

@@ -359,9 +359,19 @@ def wide(
     fiscal_year: str = "",
     period_type: str = "annual",
     fields: str = "",
+    cell_status: str = "",
 ) -> Dict[str, Any]:
     field_list = [field.strip() for field in fields.split(",") if field.strip()]
-    return datasets.read_wide(PROJECT_ROOT, page=page, page_size=page_size, company=company, fiscal_year=fiscal_year, period_type=period_type, fields=field_list)
+    return datasets.read_wide(
+        PROJECT_ROOT,
+        page=page,
+        page_size=page_size,
+        company=company,
+        fiscal_year=fiscal_year,
+        period_type=period_type,
+        fields=field_list,
+        cell_status=cell_status,
+    )
 
 
 @app.get("/api/datasets/audit")

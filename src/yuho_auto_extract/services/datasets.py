@@ -204,6 +204,7 @@ def read_wide(
     fiscal_year: str = "",
     period_type: str = "annual",
     fields: Optional[Sequence[str]] = None,
+    cell_status: str = "",
 ) -> Dict[str, Any]:
     rows = read_table(root / "data" / "final" / "final_master_wide.csv")
     rows = _attach_company_names(root, rows)
@@ -220,8 +221,26 @@ def read_wide(
     filtered = [_with_derived_values(row, selected_fields) for row in filtered]
     keep = [column for column in BASE_WIDE_COLUMNS if column in _columns(filtered)] + selected_fields
     filtered = [{column: row.get(column, "") for column in keep} for row in filtered]
+    status_map = {}
+    if cell_status:
+        status_map = _cell_statuses_for_rows(root, filtered, selected_fields)
+        filtered = [
+            row
+            for row in filtered
+            if any(
+                status_map.get(str(row.get("company_year_id", "")), {}).get(field_id, {}).get("status") == cell_status
+                for field_id in selected_fields
+            )
+        ]
     result = paginate(filtered, page, page_size)
-    result["cell_statuses"] = _cell_statuses_for_rows(root, result["rows"], selected_fields)
+    if cell_status:
+        result["cell_statuses"] = {
+            str(row.get("company_year_id", "")): status_map.get(str(row.get("company_year_id", "")), {})
+            for row in result["rows"]
+        }
+        result["cell_status_filter"] = cell_status
+    else:
+        result["cell_statuses"] = _cell_statuses_for_rows(root, result["rows"], selected_fields)
     return result
 
 

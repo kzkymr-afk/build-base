@@ -524,7 +524,16 @@ function useFactbookOptions() {
   return { options, error, refresh };
 }
 
-type ResultsFilterTarget = { company: string; fiscal_year?: string };
+type ResultsFilterTarget = { company?: string; fiscal_year?: string; cell_status?: string };
+
+const resultCellStatusOptions = [
+  { value: 'corroboration_weak', label: '根拠弱い' },
+  { value: 'corroboration_conflicted', label: '根拠間で矛盾' },
+  { value: 'corroboration_needs_review', label: '照合後に要確認' },
+  { value: 'review_saved_not_applied', label: '保存済み未反映' },
+  { value: 'blank_with_review_candidate', label: 'レビュー候補あり' },
+  { value: 'blank_no_candidate', label: '候補なし' },
+];
 
 function App() {
   const [tab, setTab] = React.useState<(typeof tabs)[number][0]>('home');
@@ -748,6 +757,9 @@ function HomeDashboardPanel({
           <small>根拠弱い値</small>
           <strong className={(weakEvidenceCount || 0) > 0 ? 'text-warn' : 'text-ok'}>{weakEvidenceCount ?? '-'}</strong>
           <span>自動確定だが照合0件</span>
+          <button className="ghost mini-action" onClick={() => onNavigateToResults({ cell_status: 'corroboration_weak' })}>
+            該当セルを見る
+          </button>
         </div>
         <div className="panel metric-panel">
           <small>監査</small>
@@ -1353,15 +1365,17 @@ function ResultsPanel({
   const [page, setPage] = React.useState(1);
   const [company, setCompany] = React.useState('');
   const [year, setYear] = React.useState('');
+  const [yearAutoDefault, setYearAutoDefault] = React.useState(true);
   const [periodType, setPeriodType] = React.useState('annual');
   const [preset, setPreset] = React.useState('all');
+  const [cellStatus, setCellStatus] = React.useState('');
 
   React.useEffect(() => {
     if (!initialFilter) return;
-    setCompany(initialFilter.company);
-    if (initialFilter.fiscal_year) {
-      setYear(initialFilter.fiscal_year);
-    }
+    setCompany(initialFilter.company || '');
+    setYear(initialFilter.fiscal_year || '');
+    setYearAutoDefault(!initialFilter.fiscal_year && !initialFilter.cell_status);
+    setCellStatus(initialFilter.cell_status || '');
     setPage(1);
   }, [initialFilter]);
   const [data, setData] = React.useState<WidePage | null>(null);
@@ -1373,10 +1387,10 @@ function ResultsPanel({
   const { options, fieldLabels, error: optionsError } = useOptions();
 
   React.useEffect(() => {
-    if (!year && options?.years.length) {
+    if (yearAutoDefault && !year && options?.years.length) {
       setYear(options.years[options.years.length - 1]);
     }
-  }, [options, year]);
+  }, [options, year, yearAutoDefault]);
 
   const selectedFields = React.useMemo(() => {
     if (!options) return '';
@@ -1386,9 +1400,9 @@ function ResultsPanel({
 
   React.useEffect(() => {
     if (!options) return;
-    const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, period_type: periodType, fields: selectedFields });
+    const params = new URLSearchParams({ page: String(page), page_size: '50', company, fiscal_year: year, period_type: periodType, fields: selectedFields, cell_status: cellStatus });
     api<WidePage>(`/api/datasets/wide?${params}`).then(setData).catch((err) => setError(String(err)));
-  }, [options, page, company, year, periodType, selectedFields, refreshToken, dataReloadToken]);
+  }, [options, page, company, year, periodType, selectedFields, cellStatus, refreshToken, dataReloadToken]);
 
   function resetPage(next: () => void) {
     setPage(1);
@@ -1439,7 +1453,7 @@ function ResultsPanel({
         </label>
         <label className="filter-field small">
           <span>年度</span>
-          <select value={year} onChange={(e) => resetPage(() => setYear(e.target.value))}>
+          <select value={year} onChange={(e) => resetPage(() => { setYearAutoDefault(false); setYear(e.target.value); })}>
             <option value="">全年度</option>
             {(options?.years || []).map((item) => (
               <option key={item} value={item}>{item}</option>
@@ -1462,8 +1476,21 @@ function ResultsPanel({
             ))}
           </select>
         </label>
+        <label className="filter-field">
+          <span>セル状態</span>
+          <select value={cellStatus} onChange={(e) => resetPage(() => setCellStatus(e.target.value))}>
+            <option value="">すべて</option>
+            {resultCellStatusOptions.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
       </FilterBar>
-      <p className="hint">初期表示は最新年度の全指標です。数値セルや空欄セルをクリックすると、根拠・レビュー候補・次の操作を確認できます。</p>
+      <p className="hint">
+        {cellStatus
+          ? `セル状態「${resultCellStatusOptions.find((item) => item.value === cellStatus)?.label || cellStatus}」に該当する会社年度だけを表示しています。`
+          : '初期表示は最新年度の全指標です。数値セルや空欄セルをクリックすると、根拠・レビュー候補・次の操作を確認できます。'}
+      </p>
       {optionsError && <InlineError message={optionsError} />}
       {error && <InlineError message={error} />}
       <CellDetailPanel

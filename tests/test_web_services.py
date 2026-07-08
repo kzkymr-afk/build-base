@@ -234,6 +234,51 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(detail["status"], "corroboration_weak")
             self.assertIn("独立した数値照合は0件", detail["summary"])
 
+    def test_wide_results_can_filter_by_cell_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "company_master.csv",
+                [
+                    {"operating_company_id": "A", "operating_company_name": "A社"},
+                    {"operating_company_id": "B", "operating_company_name": "B社"},
+                ],
+            )
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [
+                    {"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": "0.082"},
+                    {"company_year_id": "B_2024", "operating_company_id": "B", "fiscal_year": "2024", "roe": "0.071"},
+                ],
+            )
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [
+                    {"company_year_id": "A_2024", "field_id": "roe", "value": "0.082", "validation_status": "ok"},
+                    {"company_year_id": "B_2024", "field_id": "roe", "value": "0.071", "validation_status": "ok"},
+                ],
+            )
+            write_table(
+                root / "data" / "reports" / "corroboration_cells.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "roe",
+                        "review_required": "false",
+                        "corroboration_count": "0",
+                        "conflict_count": "0",
+                    }
+                ],
+            )
+
+            result = read_wide(root, fields=["roe"], cell_status="corroboration_weak")
+
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["rows"][0]["company_year_id"], "A_2024")
+            self.assertEqual(result["cell_status_filter"], "corroboration_weak")
+            self.assertEqual(result["cell_statuses"]["A_2024"]["roe"]["status"], "corroboration_weak")
+
     def test_zero_corroboration_does_not_override_existing_review_status(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
