@@ -452,6 +452,13 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
     )
 
     fact_resolution = _read_cell_resolution(root, company_year_id, field_id)
+    status, status_label, summary, next_action = _apply_corroboration_status(
+        status=status,
+        status_label=status_label,
+        summary=summary,
+        next_action=next_action,
+        resolution_row=fact_resolution,
+    )
     review_state = _review_state(current_value=current_value, review_rows=review_rows, resolved_rows=resolved_rows)
     mappings = _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows)
     return {
@@ -533,10 +540,15 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
                 failure_reason=failures.get(company_year_id, ""),
                 row_found=True,
             )
-            resolution = str(resolutions.get(key, {}).get("resolution") or "")
-            if resolution in {"conflicted", "needs_review", "needs_reconciliation"} and status == "value_present":
-                status = f"corroboration_{resolution}"
-                label = "照合要確認" if resolution != "conflicted" else "照合conflict"
+            resolution_row = resolutions.get(key, {})
+            status, label, summary, next_action = _apply_corroboration_status(
+                status=status,
+                status_label=label,
+                summary=summary,
+                next_action=next_action,
+                resolution_row=resolution_row,
+            )
+            resolution = str(resolution_row.get("resolution") or "")
             out[company_year_id][field_id] = {
                 "status": status,
                 "status_label": label,
@@ -567,6 +579,40 @@ def _read_cell_resolutions(root: Path) -> Dict[tuple[str, str], Dict[str, Any]]:
 def _read_cell_resolution(root: Path, company_year_id: str, field_id: str) -> Dict[str, Any]:
     row = _read_cell_resolutions(root).get((company_year_id, field_id), {})
     return _decode_semantics_row(row) if row else {}
+
+
+def _apply_corroboration_status(
+    *,
+    status: str,
+    status_label: str,
+    summary: str,
+    next_action: str,
+    resolution_row: Dict[str, Any],
+) -> tuple[str, str, str, str]:
+    resolution = str(resolution_row.get("resolution") or "")
+    if status != "value_present" or resolution not in {"conflicted", "needs_review", "needs_reconciliation"}:
+        return status, status_label, summary, next_action
+
+    if resolution == "conflicted":
+        return (
+            "corroboration_conflicted",
+            "照合conflict",
+            "最終結果に値がありますが、複数根拠の照合で不一致が残っています。",
+            "根拠チェーンと候補値を確認し、必要ならこのセルから手入力で修正してください。",
+        )
+    if resolution == "needs_reconciliation":
+        return (
+            "corroboration_needs_reconciliation",
+            "照合要確認",
+            "最終結果に値がありますが、同じ照合グループ内で確認が必要です。",
+            "照合グループと根拠チェーンを確認し、妥当ならこのセルの値を維持、違う場合は手入力で修正してください。",
+        )
+    return (
+        "corroboration_needs_review",
+        "照合要確認",
+        "最終結果に値がありますが、照合結果が自動確定条件を満たしていません。",
+        "候補・根拠チェーン・source_audit を確認し、妥当ならこの値を維持、違う場合はこのセルから修正してください。",
+    )
 
 
 def _review_state(*, current_value: str, review_rows: Sequence[Dict[str, Any]], resolved_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1037,14 +1083,14 @@ def _classify_cell(
             "review_saved_not_applied",
             "レビュー保存済み",
             "review_resolved.csv に保存済みの判断がありますが、最終結果はまだ空欄です。",
-            "実行タブまたはレビュー画面から「レビュー反映」を実行すると final_master_wide.csv に反映されます。",
+            "このセルの保存内容を確認し、Cell Workbench から最終表への反映を実行してください。",
         )
     if any(not _is_blank(row.get("extracted_value", "")) for row in review_rows):
         return (
             "blank_with_review_candidate",
             "レビュー候補あり",
             "抽出候補がありますが、自動採用されずレビュー待ちになっています。",
-            "レビュー画面で accept または correct を保存し、その後「レビュー反映」を実行してください。",
+            "Cell Workbench で候補を確認し、「この値で最終表を更新」または「手入力で修正」を実行してください。",
         )
     if has_audit:
         return (

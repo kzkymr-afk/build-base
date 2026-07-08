@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
+from ..io_utils import is_blankish, read_table
 from . import semantics_store
 
 ALLOWED_UPDATE_FIELDS = {
@@ -28,6 +30,7 @@ def list_concepts(
     page: int = 1,
     page_size: int = 100,
 ) -> Dict[str, Any]:
+    final_value_counts = _final_value_counts(root)
     conn = semantics_store.connect(root)
     try:
         rows = []
@@ -37,7 +40,7 @@ def list_concepts(
             haystack = " ".join(str(concept.get(key) or "") for key in ("concept_id", "concept_name_ja", "category", "definition_ja"))
             if search and search.lower() not in haystack.lower():
                 continue
-            rows.append({**concept, **_concept_stats(conn, str(concept.get("concept_id") or ""))})
+            rows.append({**concept, **_concept_stats(conn, str(concept.get("concept_id") or ""), final_value_counts)})
     finally:
         conn.close()
     rows.sort(key=lambda row: (str(row.get("status") or ""), str(row.get("category") or ""), str(row.get("concept_id") or "")))
@@ -162,7 +165,7 @@ def _get_concept_with_stats(conn: Any, concept_id: str) -> Dict[str, Any]:
     return {**_require_concept(conn, concept_id), **_concept_stats(conn, concept_id)}
 
 
-def _concept_stats(conn: Any, concept_id: str) -> Dict[str, Any]:
+def _concept_stats(conn: Any, concept_id: str, final_value_counts: Dict[str, int] | None = None) -> Dict[str, Any]:
     mapping_count = conn.execute("select count(*) from concept_mappings where concept_id = ?", (concept_id,)).fetchone()[0]
     confirmed_count = conn.execute(
         "select count(*) from concept_mappings where concept_id = ? and status = 'confirmed'",
@@ -172,7 +175,26 @@ def _concept_stats(conn: Any, concept_id: str) -> Dict[str, Any]:
         "select count(*) from concept_mappings where concept_id = ? and status = 'proposed'",
         (concept_id,),
     ).fetchone()[0]
-    return {"mapping_count": mapping_count, "confirmed_mapping_count": confirmed_count, "proposed_mapping_count": proposed_count}
+    final_value_count = int((final_value_counts or {}).get(concept_id, 0))
+    return {
+        "mapping_count": mapping_count,
+        "confirmed_mapping_count": confirmed_count,
+        "proposed_mapping_count": proposed_count,
+        "final_value_count": final_value_count,
+        "coverage_hint": f"{final_value_count}件" if final_value_count else "未実値化",
+    }
+
+
+def _final_value_counts(root: Path) -> Dict[str, int]:
+    path = root / "data" / "final" / "final_master_long.csv"
+    if not path.exists():
+        return {}
+    counts: Counter[str] = Counter()
+    for row in read_table(path):
+        concept_id = str(row.get("field_id") or row.get("concept_id") or "")
+        if concept_id and not is_blankish(row.get("value")):
+            counts[concept_id] += 1
+    return dict(counts)
 
 
 def _count_by(rows: Sequence[Dict[str, Any]], key: str) -> Dict[str, int]:

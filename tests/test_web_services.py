@@ -791,7 +791,47 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(detail["status"], "blank_with_review_candidate")
             self.assertTrue(detail["has_review_candidate"])
             self.assertEqual(detail["field_name_ja"], "ROE")
-            self.assertIn("accept", detail["next_action"])
+            self.assertIn("Cell Workbench", detail["next_action"])
+
+    def test_cell_detail_uses_same_corroboration_status_as_wide_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "fiscal_year": "2024", "operating_company_id": "A", "roe": "0.082"}],
+            )
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [{"company_year_id": "A_2024", "field_id": "roe", "value": "0.082", "validation_status": "ok"}],
+            )
+            conn = semantics_store.connect(root)
+            try:
+                semantics_store.replace_cell_resolutions(
+                    conn,
+                    [
+                        {
+                            "company_year_id": "A_2024",
+                            "concept_id": "roe",
+                            "value": 0.082,
+                            "resolution": "needs_reconciliation",
+                            "corroboration_count": 1,
+                            "conflict_count": 0,
+                        }
+                    ],
+                    run_id="run1",
+                )
+            finally:
+                conn.close()
+
+            detail = read_cell_detail(root, "A_2024", "roe")
+            wide = read_wide(root, fields=["roe"])
+            wide_status = wide["cell_statuses"]["A_2024"]["roe"]
+
+            self.assertEqual(detail["status"], "corroboration_needs_reconciliation")
+            self.assertEqual(detail["status"], wide_status["status"])
+            self.assertEqual(detail["status_label"], wide_status["status_label"])
 
     def test_cell_detail_marks_document_failure_before_extraction_advice(self):
         with tempfile.TemporaryDirectory() as tmp:

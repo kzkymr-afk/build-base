@@ -402,6 +402,8 @@ export type ConceptRow = {
   mapping_count: number;
   confirmed_mapping_count: number;
   proposed_mapping_count: number;
+  final_value_count: number;
+  coverage_hint: string;
 };
 
 export type ConceptListResult = {
@@ -419,6 +421,9 @@ export type ReconciliationGroup = {
   company_year_count: number;
   field_count: number;
   sample_rows: Row[];
+  source?: string;
+  apply_supported?: boolean;
+  review_queue_match_count?: number;
 };
 
 export type ReconciliationGroupsResult = {

@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from yuho_auto_extract.io_utils import write_table
 from yuho_auto_extract.services import semantics_concepts, semantics_store
 
 
@@ -108,6 +109,37 @@ class SemanticsConceptsTests(unittest.TestCase):
             self.assertEqual(result["total"], 1)
             self.assertEqual(result["rows"][0]["concept_id"], "a")
             self.assertEqual(result["status_counts"], {"active": 1})
+
+    def test_list_concepts_reports_final_value_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            conn = semantics_store.connect(root)
+            try:
+                semantics_store.upsert_canonical_concepts(
+                    conn,
+                    [
+                        {"concept_id": "sales", "concept_name_ja": "売上高", "category": "performance", "status": "active"},
+                        {"concept_id": "nc_new", "concept_name_ja": "新概念", "category": "orders", "status": "active"},
+                    ],
+                )
+            finally:
+                conn.close()
+            write_table(
+                root / "data" / "final" / "final_master_long.csv",
+                [
+                    {"company_year_id": "A_2024", "field_id": "sales", "value": "100"},
+                    {"company_year_id": "B_2024", "field_id": "sales", "value": "0"},
+                    {"company_year_id": "A_2024", "field_id": "nc_new", "value": ""},
+                ],
+            )
+
+            result = semantics_concepts.list_concepts(root, status="active")
+            rows = {row["concept_id"]: row for row in result["rows"]}
+
+            self.assertEqual(rows["sales"]["final_value_count"], 2)
+            self.assertEqual(rows["sales"]["coverage_hint"], "2件")
+            self.assertEqual(rows["nc_new"]["final_value_count"], 0)
+            self.assertEqual(rows["nc_new"]["coverage_hint"], "未実値化")
 
 
 if __name__ == "__main__":

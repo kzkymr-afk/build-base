@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from yuho_auto_extract.io_utils import read_table, write_table
-from yuho_auto_extract.services import reconciliation
+from yuho_auto_extract.services import reconciliation, semantics_store
 
 
 class ReconciliationTests(unittest.TestCase):
@@ -45,6 +45,50 @@ class ReconciliationTests(unittest.TestCase):
             self.assertEqual(group["item_count"], 2)
             self.assertEqual(group["company_year_count"], 1)
             self.assertEqual(group["field_count"], 2)
+            self.assertTrue(group["apply_supported"])
+
+    def test_read_groups_includes_needs_reconciliation_cell_resolutions_as_display_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "data" / "review" / "review_queue.csv", [])
+            conn = semantics_store.connect(root)
+            try:
+                semantics_store.replace_cell_resolutions(
+                    conn,
+                    [
+                        {
+                            "company_year_id": "A_2024",
+                            "concept_id": "roe",
+                            "value": 0.082,
+                            "resolution": "needs_reconciliation",
+                            "corroboration_count": 1,
+                            "conflict_count": 0,
+                            "review_reason": "identity mismatch",
+                        },
+                        {
+                            "company_year_id": "B_2024",
+                            "concept_id": "roe",
+                            "value": 0.091,
+                            "resolution": "needs_reconciliation",
+                            "corroboration_count": 1,
+                            "conflict_count": 0,
+                        },
+                    ],
+                    run_id="run1",
+                )
+            finally:
+                conn.close()
+
+            result = reconciliation.read_reconciliation_groups(root)
+
+            self.assertEqual(result["total"], 1)
+            group = result["groups"][0]
+            self.assertEqual(group["group_id"], "needs_reconciliation:roe")
+            self.assertEqual(group["item_count"], 2)
+            self.assertEqual(group["company_year_count"], 2)
+            self.assertEqual(group["field_count"], 1)
+            self.assertFalse(group["apply_supported"])
+            self.assertEqual(group["sample_rows"][0]["resolution"], "needs_reconciliation")
 
     def test_apply_group_uses_resolved_review_flow(self):
         with tempfile.TemporaryDirectory() as tmp:

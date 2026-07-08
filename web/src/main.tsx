@@ -1539,6 +1539,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                   <th>名称</th>
                   <th>status</th>
                   <th>map</th>
+                  <th>final</th>
                   <th>単位</th>
                 </tr>
               </thead>
@@ -1549,6 +1550,7 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
                     <td>{row.concept_name_ja}</td>
                     <td><span className={`badge ${row.status === 'active' ? 'succeeded' : 'pending'}`}>{row.status}</span></td>
                     <td className="mono">{row.mapping_count}</td>
+                    <td><span className={`badge ${row.final_value_count ? 'succeeded' : 'pending'}`}>{row.coverage_hint || `${row.final_value_count || 0}件`}</span></td>
                     <td>{row.target_unit}</td>
                   </tr>
                 ))}
@@ -1565,6 +1567,11 @@ function ConceptManagementPanel({ onError, refreshToken }: { onError: (message: 
             {selected ? (
               <>
                 <h3>{selected.concept_id}</h3>
+                <div className="detail-grid">
+                  <div><small>final実値</small><strong>{selected.coverage_hint || `${selected.final_value_count || 0}件`}</strong></div>
+                  <div><small>confirmed map</small><strong>{selected.confirmed_mapping_count}</strong></div>
+                  <div><small>proposed map</small><strong>{selected.proposed_mapping_count}</strong></div>
+                </div>
                 <label>名称<input value={draft.concept_name_ja || ''} onChange={(event) => setDraft({ ...draft, concept_name_ja: event.target.value })} /></label>
                 <label>カテゴリ<input value={draft.category || ''} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
                 <div className="inline-fields">
@@ -2590,6 +2597,15 @@ function FactbooksPanel({
     }
   }
 
+  const hasFactbookRows = Boolean(status?.order_rows);
+  const factbookHasNoComparableRows = hasFactbookRows && validation?.comparable_rows === 0;
+  const factbookBadgeClass = status?.last_error_count ? 'running' : factbookHasNoComparableRows ? 'pending' : hasFactbookRows ? 'succeeded' : 'pending';
+  const factbookBadgeLabel = status?.last_error_count ? '一部エラー' : factbookHasNoComparableRows ? '未検証' : hasFactbookRows ? 'データあり' : '未取得';
+  const validationHasNoComparableRows = Boolean(validation?.rows) && validation?.comparable_rows === 0;
+  const validationBadgeClass = validation?.status === 'completed' ? 'succeeded' : validation?.status === 'mismatch' ? 'failed' : 'pending';
+  const validationBadgeLabel = validationHasNoComparableRows ? '照合不可' : validation?.status || '未検証';
+  const comparableRate = validation?.rows ? `${(((validation.comparable_rows || 0) / validation.rows) * 100).toFixed(1)}%` : '-';
+
   return (
     <section className="stack">
       <div className="panel automation-panel">
@@ -2598,8 +2614,8 @@ function FactbooksPanel({
             <h2>ファクトブック受注カテゴリ</h2>
             <p className="muted">{status?.message || 'ファクトブック取得状態を読み込み中です。'}</p>
           </div>
-          <span className={`badge ${status?.last_error_count ? 'running' : status?.order_rows ? 'succeeded' : 'pending'}`}>
-            {status?.last_error_count ? '一部エラー' : status?.order_rows ? 'データあり' : '未取得'}
+          <span className={`badge ${factbookBadgeClass}`}>
+            {factbookBadgeLabel}
           </span>
         </div>
         <div className="automation-grid">
@@ -2624,6 +2640,11 @@ function FactbooksPanel({
             <strong>{status ? `${status.enabled_source_count}/${status.source_count}` : '-'}</strong>
           </div>
         </div>
+        {factbookHasNoComparableRows && (
+          <div className="alert">
+            ファクトブック抽出行はありますが、有報値と比較可能な行が0件です。用途別受注などの対応付け・有報側の値補完が終わるまで、自動採用済みデータとして扱わないでください。
+          </div>
+        )}
         <div className="inline-actions">
           <button onClick={() => startRefresh(false)} disabled={jobRunning}>公式ソースを取得</button>
           <button className="ghost" onClick={() => startRefresh(true)} disabled={jobRunning}>取得ドライラン</button>
@@ -2638,13 +2659,14 @@ function FactbooksPanel({
               {validation?.validated_at_utc ? `最終検証: ${validation.validated_at_utc}` : '照合結果を読み込み中です。'}
             </p>
           </div>
-          <span className={`badge ${validation?.status === 'completed' ? 'succeeded' : validation?.status === 'mismatch' ? 'failed' : 'pending'}`}>
-            {validation?.status || '未検証'}
+          <span className={`badge ${validationBadgeClass}`}>
+            {validationBadgeLabel}
           </span>
         </div>
         <div className="automation-grid">
           <div className="metric"><small>検証行</small><strong>{validation?.rows ?? '-'}</strong></div>
           <div className="metric"><small>比較可能</small><strong>{validation?.comparable_rows ?? '-'}</strong></div>
+          <div className="metric"><small>比較可能率</small><strong className={validationHasNoComparableRows ? 'text-warn' : ''}>{comparableRate}</strong></div>
           <div className="metric"><small>未完了</small><strong className={validation?.incomplete_rows ? 'text-warn' : 'text-ok'}>{validation?.incomplete_rows ?? '-'}</strong></div>
           <div className="metric"><small>pending</small><strong>{validation?.pending_rows ?? '-'}</strong></div>
           {Object.entries(validation?.by_status || {}).slice(0, 4).map(([key, value]) => (
@@ -4893,6 +4915,7 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
                   <th>items</th>
                   <th>company_year</th>
                   <th>fields</th>
+                  <th>source</th>
                 </tr>
               </thead>
               <tbody>
@@ -4902,6 +4925,7 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
                     <td className="mono">{group.item_count}</td>
                     <td className="mono">{group.company_year_count}</td>
                     <td className="mono">{group.field_count}</td>
+                    <td><span className={`badge ${group.apply_supported === false ? 'pending' : 'succeeded'}`}>{group.source || 'review_queue'}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -4916,12 +4940,17 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
                   <div><small>company_year</small><strong>{selected.company_year_count}</strong></div>
                   <div><small>fields</small><strong>{selected.field_count}</strong></div>
                 </div>
+                {selected.apply_supported === false && (
+                  <div className="alert">
+                    このグループは cell_resolutions の needs_reconciliation 由来です。一括acceptではなく、サンプルのセルを結果表から開いて個別に確認してください。
+                  </div>
+                )}
                 <label>メモ<textarea rows={3} value={note} onChange={(event) => setNote(event.target.value)} placeholder="判断メモ" /></label>
-                <button onClick={acceptGroup} disabled={saving}>グループをaccept保存</button>
+                <button onClick={acceptGroup} disabled={saving || selected.apply_supported === false}>グループをaccept保存</button>
                 <MiniRows
                   title="サンプル"
                   rows={selected.sample_rows}
-                  columns={['company_year_id', 'field_id', 'field_name_ja', 'existing_value', 'extracted_value', 'review_reason']}
+                  columns={['company_year_id', 'field_id', 'field_name_ja', 'existing_value', 'extracted_value', 'review_reason', 'resolution', 'corroboration_count', 'conflict_count']}
                   emptyMessage="サンプル行はありません。"
                 />
               </>
