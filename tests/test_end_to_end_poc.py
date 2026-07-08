@@ -87,6 +87,85 @@ class EndToEndPocContractTests(unittest.TestCase):
         self.assertEqual(exportable[0]["value"], "8.2")
         self.assertEqual(exportable[0]["review_status"], "approved")
 
+    def test_accept_review_with_existing_extracted_row_uses_saved_review_value(self):
+        rows = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "rd_expense",
+                "value": "8",
+                "value_normalized": "8",
+                "validation_status": "fail",
+                "review_required": True,
+            }
+        ]
+        reviewed = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "rd_expense",
+                "review_decision": "accept",
+                "corrected_value": "168",
+                "extracted_value": "8",
+                "unit_normalized": "百万円",
+            }
+        ]
+
+        final = apply_review_decisions(rows, reviewed)
+        exportable = filter_exportable_rows(final)
+
+        self.assertEqual(len(exportable), 1)
+        self.assertEqual(exportable[0]["value"], "168")
+        self.assertEqual(exportable[0]["value_normalized"], "168")
+        self.assertEqual(exportable[0]["review_status"], "approved")
+        self.assertFalse(exportable[0]["review_required"])
+
+    def test_accept_review_with_blank_extracted_row_is_exported_from_saved_value(self):
+        rows = [
+            {
+                "company_year_id": "KAJIMA_2015",
+                "field_id": "building_orders_total",
+                "value": "",
+                "value_normalized": "",
+                "validation_status": "fail",
+                "review_required": True,
+            }
+        ]
+        reviewed = [
+            {
+                "company_year_id": "KAJIMA_2015",
+                "field_id": "building_orders_total",
+                "review_decision": "accept",
+                "extracted_value": "902092",
+                "unit_normalized": "百万円",
+            }
+        ]
+
+        final = apply_review_decisions(rows, reviewed)
+        exportable = filter_exportable_rows(final)
+
+        self.assertEqual(len(exportable), 1)
+        self.assertEqual(exportable[0]["value"], "902092")
+        self.assertEqual(exportable[0]["review_status"], "approved")
+
+    def test_accept_review_sets_duplicate_extracted_rows_to_saved_value(self):
+        rows = [
+            {"company_year_id": "A_2024", "field_id": "rd_expense", "value": "168", "validation_status": "pass"},
+            {"company_year_id": "A_2024", "field_id": "rd_expense", "value": "8", "validation_status": "fail", "review_required": True},
+        ]
+        reviewed = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "rd_expense",
+                "review_decision": "accept",
+                "corrected_value": "168",
+                "extracted_value": "8",
+            }
+        ]
+
+        final = apply_review_decisions(rows, reviewed)
+
+        self.assertEqual({row["value"] for row in final}, {"168"})
+        self.assertTrue(all(row["review_status"] == "approved" for row in final))
+
     def test_wide_values_prefers_field_preferred_method_when_multiple_sources_agree(self):
         rows = [
             {

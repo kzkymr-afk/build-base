@@ -119,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(handler=cmd_import_manual_technicians)
 
     p = sub.add_parser("export-final")
-    p.add_argument("--reviewed", default="data/review/review_resolved.xlsx")
+    p.add_argument("--reviewed", default="data/review/review_resolved.csv")
     p.set_defaults(handler=cmd_export_final)
 
     sub.add_parser("build-analysis").set_defaults(handler=cmd_build_analysis)
@@ -339,7 +339,7 @@ def cmd_run_local(root: Path, args: argparse.Namespace) -> int:
     split_counts = split_local_review_rows(root)
     print(f"local_auto_accepted: {split_counts.get('accepted_rows', 0)}")
     print(f"local_manual_rows: {split_counts.get('manual_rows', 0)}")
-    cmd_export_final(root, argparse.Namespace(reviewed="data/review/review_resolved_local_pass.xlsx"))
+    cmd_export_final(root, argparse.Namespace(reviewed="data/review/review_resolved.csv"))
     cmd_build_analysis(root, argparse.Namespace())
     cmd_report(root, argparse.Namespace())
     return 0

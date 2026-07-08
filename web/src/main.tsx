@@ -957,7 +957,7 @@ function RunPanel({ job, onJob, onError, onRefreshStatus, status }: {
         <button onClick={() => start('/api/jobs/reextract-with-review')} disabled={jobRunning}>保存済みレビューで再抽出</button>
         <button onClick={() => start('/api/jobs/report')} disabled={jobRunning}>レポート更新</button>
         <button onClick={() => start('/api/jobs/algorithm-audit')} disabled={jobRunning}>抽出ロジックを点検</button>
-        <button onClick={() => start('/api/jobs/apply-review')} disabled={jobRunning}>レビュー結果を反映</button>
+        <button onClick={() => start('/api/jobs/apply-review')} disabled={jobRunning}>保存済み修正を最終表に反映</button>
       </div>
       {jobRunning && <p className="hint action-lock">ジョブ実行中です。完了まで新しい実行操作はできません。</p>}
       <AnnualAutomationPanel
@@ -1949,7 +1949,7 @@ function CellDetailPanel({
   const mappingRows = (detail.mapping_state?.mappings as Row[] | undefined) || [];
   const proposedMappings = mappingRows.filter((row) => String(row.status || '') === 'proposed');
 
-  async function saveReview(nextDecision = decision, nextValue = correctedValue) {
+  async function saveReview(nextDecision = decision, nextValue = correctedValue, options: { applyAfterSave?: boolean } = { applyAfterSave: true }) {
     if (!detail) return;
     if (jobRunning) {
       setPanelError('ジョブ実行中です。完了後に保存してください。');
@@ -1963,7 +1963,7 @@ function CellDetailPanel({
       setPanelError('accept で保存するには候補値が必要です。手入力の場合は correct を選んでください。');
       return;
     }
-    setBusy('review');
+    setBusy(options.applyAfterSave ? 'review-apply' : 'review');
     setPanelError('');
     setExpandPreview(null);
     setExpandTargetCount(0);
@@ -1977,8 +1977,14 @@ function CellDetailPanel({
           reviewer: 'web_cell_workbench'
         })
       });
-      setMessage(`セルレビューを保存しました: ${result.changed}件 / resolved合計 ${result.total}件。最終表へ出すにはレビュー反映が必要です。`);
       setInferredSuggestion(result.inferred_source_suggestion || null);
+      if (options.applyAfterSave) {
+        const next = await api<Job>('/api/jobs/apply-review', { method: 'POST' });
+        onJob(next);
+        setMessage(`セルレビューを保存し、最終表更新ジョブを開始しました: ${result.changed}件 / resolved合計 ${result.total}件。`);
+      } else {
+        setMessage(`セルレビューを保存しました: ${result.changed}件 / resolved合計 ${result.total}件。最終表は未更新です。`);
+      }
       onChanged();
     } catch (err) {
       setPanelError(String(err));
@@ -2014,7 +2020,7 @@ function CellDetailPanel({
     try {
       const next = await api<Job>('/api/jobs/apply-review', { method: 'POST' });
       onJob(next);
-      setMessage('保存済みレビューを最終データへ反映するジョブを開始しました。');
+      setMessage('保存済みレビューを最終表へ反映するジョブを開始しました。');
     } catch (err) {
       setPanelError(String(err));
     } finally {
@@ -2181,7 +2187,7 @@ function CellDetailPanel({
 
       <div className="workbench-grid">
         <div className="workbench-card">
-          <h3>セル値を保存</h3>
+          <h3>セル値を最終表へ更新</h3>
           <label>判定</label>
           <select value={decision} onChange={(e) => setDecision(e.target.value)}>
             <option value="accept">候補値を採用</option>
@@ -2194,14 +2200,14 @@ function CellDetailPanel({
           <label>メモ</label>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
           <div className="toolbar">
-            <button type="button" onClick={() => saveReview()} disabled={busy === 'review' || jobRunning}>
-              {busy === 'review' ? '保存中...' : '保存'}
+            <button type="button" onClick={() => saveReview(decision, correctedValue, { applyAfterSave: true })} disabled={busy === 'review' || busy === 'review-apply' || jobRunning}>
+              {busy === 'review-apply' ? '更新中...' : 'この値で最終表を更新'}
             </button>
-            <button type="button" className="secondary" onClick={applyReviewJob} disabled={busy === 'apply-review' || jobRunning || !reviewState.saved}>
-              {busy === 'apply-review' ? '起動中...' : '最終表へ反映'}
+            <button type="button" className="secondary" onClick={() => saveReview(decision, correctedValue, { applyAfterSave: false })} disabled={busy === 'review' || busy === 'review-apply' || jobRunning}>
+              {busy === 'review' ? '保存中...' : '保存のみ'}
             </button>
           </div>
-          <p className="hint">保存は review_resolved.csv に残ります。最終表へ出すには反映ジョブが必要です。</p>
+          <p className="hint">通常は保存と最終表更新をまとめて実行します。保存のみは監査用に判断だけ残す操作です。</p>
         </div>
 
         <div className="workbench-card">
@@ -2217,9 +2223,9 @@ function CellDetailPanel({
                     const value = String(candidate.value || '');
                     setDecision('correct');
                     setCorrectedValue(value);
-                    void saveReview('correct', value);
+                    void saveReview('correct', value, { applyAfterSave: true });
                   }}
-                  disabled={busy === 'review' || jobRunning}
+                  disabled={busy === 'review' || busy === 'review-apply' || jobRunning}
                 >
                   <strong>{String(candidate.value || '-')}</strong>
                   <span>{String(candidate.source || '')} / {String(candidate.reason || '')}</span>
@@ -3032,7 +3038,7 @@ function ReviewPanel({
     try {
       const next = await api<Job>('/api/jobs/apply-review', { method: 'POST' });
       onJob(next);
-      setMessage('保存済みレビュー全体を最終データへ一括反映するジョブを開始しました。');
+      setMessage('保存済み修正全体を最終表へ一括反映するジョブを開始しました。');
       window.setTimeout(loadAutomationStatus, 1000);
     } catch (err) {
       setPanelError(String(err));
@@ -3198,7 +3204,7 @@ function ReviewPanel({
         <div className="panel review-batch-panel">
           <div>
             <h2>3. 最終データへ一括反映</h2>
-            <p className="muted">保存済みレビュー全体を final_master、分析データ、レポートへ反映します。レビューと再取得結果を確認してから押します。</p>
+            <p className="muted">保存済み修正全体を final_master、分析データ、レポートへ反映します。レビューと再取得結果を確認してから押します。</p>
           </div>
           <div className="review-batch-metrics">
             <div className="metric compact">
@@ -3347,7 +3353,7 @@ function ReviewWorkflowGuide({
     },
     {
       title: '3. 最終データへ一括反映',
-      body: '保存済みレビューを final_master、分析データ、レポートへ反映します。',
+      body: '保存済み修正を final_master、分析データ、レポートへ反映します。',
       meta: `${savedUnappliedReviews}件 未反映`
     }
   ];
@@ -3357,7 +3363,7 @@ function ReviewWorkflowGuide({
       <div className="panel-head">
         <div>
           <h2>レビュー作業の流れ</h2>
-          <p className="muted">通常は 1 から 3 の順に進めます。セル値修正は保存済みレビューとして残り、最終反映で完成表へ反映されます。</p>
+          <p className="muted">結果表のセルから直す場合は保存と最終表更新をまとめて実行できます。この画面は保存済み修正の確認、一括処理、監査用です。</p>
         </div>
       </div>
       <div className="review-workflow-steps">

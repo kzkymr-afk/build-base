@@ -39,14 +39,15 @@ def apply_review_decisions(extracted_rows: Iterable[Dict[str, Any]], reviewed_ro
             elif decision == "not_applicable":
                 copied["review_status"] = "not_applicable"
                 copied["review_required"] = False
-            elif decision == "correct":
-                copied["value"] = review.get("corrected_value")
-                copied["value_normalized"] = review.get("corrected_value")
-                copied["review_status"] = "corrected"
-                copied["extraction_method"] = "MANUAL"
-                copied["review_required"] = False
-            elif decision == "accept":
-                copied["review_status"] = "approved"
+            elif decision in {"accept", "correct"}:
+                review_value = _resolved_review_value(review)
+                if not is_blankish(review_value):
+                    copied["value"] = review_value
+                    copied["value_normalized"] = review_value
+                    if decision == "correct" or is_blankish(row.get("value")):
+                        copied["extraction_method"] = "MANUAL"
+                    _copy_review_audit_fields(copied, review)
+                copied["review_status"] = "corrected" if decision == "correct" else "approved"
                 copied["review_required"] = False
             else:
                 copied.setdefault("review_status", "unreviewed")
@@ -70,16 +71,10 @@ def _synthetic_reviewed_row(review: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     decision = str(review.get("review_decision", "")).strip().lower()
     if decision in {"reject", "not_applicable"}:
         return None
-    if decision == "correct":
-        value = review.get("corrected_value")
-        review_status = "corrected"
-    elif decision == "accept":
-        value = review.get("corrected_value")
-        if is_blankish(value):
-            value = review.get("extracted_value")
-        review_status = "approved"
-    else:
+    if decision not in {"accept", "correct"}:
         return None
+    value = _resolved_review_value(review)
+    review_status = "corrected" if decision == "correct" else "approved"
     if is_blankish(value):
         return None
     return {
@@ -105,6 +100,40 @@ def _synthetic_reviewed_row(review: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "review_status": review_status,
         "review_required": False,
     }
+
+
+def _resolved_review_value(review: Dict[str, Any]) -> Any:
+    decision = str(review.get("review_decision", "")).strip().lower()
+    if decision == "correct":
+        return review.get("corrected_value")
+    if decision == "accept":
+        value = review.get("corrected_value")
+        if is_blankish(value):
+            value = review.get("extracted_value")
+        return value
+    return None
+
+
+def _copy_review_audit_fields(row: Dict[str, Any], review: Dict[str, Any]) -> None:
+    for field in (
+        "field_name_ja",
+        "unit_normalized",
+        "data_scope",
+        "source_segment_label",
+        "normalized_segment_key",
+        "segment_taxonomy_status",
+        "applies_to_company_id",
+        "field_creation_reason",
+        "source_doc_id",
+        "source_file",
+        "source_heading",
+        "source_quote",
+        "confidence",
+        "validation_status",
+    ):
+        value = review.get(field)
+        if not is_blankish(value):
+            row[field] = value
 
 
 def filter_exportable_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
