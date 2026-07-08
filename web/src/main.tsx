@@ -365,6 +365,14 @@ function reviewSavedLabel(value: unknown): string {
   return String(value || '') === 'yes' ? '保存済み' : '未保存';
 }
 
+function formatConfidence(value: unknown): string {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '-';
+  if (num >= 0.9) return '高';
+  if (num >= 0.7) return '中';
+  return '低';
+}
+
 function renderClampedText(value: unknown, className = '') {
   const text = String(value ?? '');
   return <span className={`clamped-cell ${className}`.trim()} title={text}>{text}</span>;
@@ -1898,6 +1906,9 @@ function CellDetailPanel({
   const [busy, setBusy] = React.useState('');
   const [message, setMessage] = React.useState('');
   const [panelError, setPanelError] = React.useState('');
+  const [inferredSuggestion, setInferredSuggestion] = React.useState<Row | null>(null);
+  const [expandPreview, setExpandPreview] = React.useState<Row[] | null>(null);
+  const [expandTargetCount, setExpandTargetCount] = React.useState(0);
 
   React.useEffect(() => {
     if (!detail) return;
@@ -1911,6 +1922,9 @@ function CellDetailPanel({
     setSimilarCount(0);
     setMessage('');
     setPanelError('');
+    setInferredSuggestion(null);
+    setExpandPreview(null);
+    setExpandTargetCount(0);
   }, [detail?.company_year_id, detail?.field_id]);
 
   if (loading) {
@@ -1951,8 +1965,10 @@ function CellDetailPanel({
     }
     setBusy('review');
     setPanelError('');
+    setExpandPreview(null);
+    setExpandTargetCount(0);
     try {
-      const result = await api<{ changed: number; total: number }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/review`, {
+      const result = await api<{ changed: number; total: number; inferred_source_suggestion?: Row | null }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/review`, {
         method: 'POST',
         body: JSON.stringify({
           review_decision: nextDecision,
@@ -1962,6 +1978,7 @@ function CellDetailPanel({
         })
       });
       setMessage(`セルレビューを保存しました: ${result.changed}件 / resolved合計 ${result.total}件。最終表へ出すにはレビュー反映が必要です。`);
+      setInferredSuggestion(result.inferred_source_suggestion || null);
       onChanged();
     } catch (err) {
       setPanelError(String(err));
@@ -2073,6 +2090,47 @@ function CellDetailPanel({
     }
   }
 
+  async function previewExpandToYears() {
+    if (!detail) return;
+    setBusy('expand-preview');
+    setPanelError('');
+    try {
+      const result = await api<{ target_count: number; targets: Row[] }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/expand-to-years`, {
+        method: 'POST',
+        body: JSON.stringify({ preview: true, reviewer: 'web_cell_workbench' })
+      });
+      setExpandTargetCount(result.target_count);
+      setExpandPreview(result.targets);
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function applyExpandToYears() {
+    if (!detail || !expandPreview) return;
+    const ok = window.confirm(`他の${expandTargetCount}年度に同じ表から取得した値を反映します。実行しますか？`);
+    if (!ok) return;
+    setBusy('expand-apply');
+    setPanelError('');
+    try {
+      const result = await api<{ changed: number; target_count: number }>(`/api/cells/${encodeURIComponent(detail.company_year_id)}/${encodeURIComponent(detail.field_id)}/expand-to-years`, {
+        method: 'POST',
+        body: JSON.stringify({ preview: false, reviewer: 'web_cell_workbench' })
+      });
+      setMessage(`他の年度に反映しました: ${result.changed}件 / 対象 ${result.target_count}年度。最終表へ出すにはレビュー反映が必要です。`);
+      setExpandPreview(null);
+      setExpandTargetCount(0);
+      setInferredSuggestion(null);
+      onChanged();
+    } catch (err) {
+      setPanelError(String(err));
+    } finally {
+      setBusy('');
+    }
+  }
+
   return (
     <div className="panel cell-detail cell-workbench">
       <div className="panel-head">
@@ -2172,6 +2230,35 @@ function CellDetailPanel({
             <p className="muted">候補値はありません。必要なら手入力で保存します。</p>
           )}
         </div>
+
+        {inferredSuggestion && (
+          <div className="workbench-card">
+            <h3>📌 出典を特定しました</h3>
+            <p>
+              {String(inferredSuggestion.section_name || '有報の表')} の「{String(inferredSuggestion.role || '該当項目')}」欄
+              （確からしさ {formatConfidence(inferredSuggestion.confidence)}）から見つかりました。
+            </p>
+            {Number(inferredSuggestion.expandable_year_count || 0) > 0 ? (
+              <p className="muted">この会社の他の年度（未入力 {String(inferredSuggestion.expandable_year_count)}件）にも同じ表から取得できる可能性があります。</p>
+            ) : (
+              <p className="muted">この会社に未入力の他年度はありません。</p>
+            )}
+            <div className="toolbar">
+              <button type="button" className="secondary" onClick={previewExpandToYears} disabled={busy === 'expand-preview' || jobRunning}>
+                {busy === 'expand-preview' ? '確認中...' : '他の年度に展開（プレビュー）'}
+              </button>
+              <button type="button" onClick={applyExpandToYears} disabled={!expandPreview || expandTargetCount === 0 || busy === 'expand-apply' || jobRunning}>
+                {busy === 'expand-apply' ? '反映中...' : '反映する'}
+              </button>
+            </div>
+            {expandPreview && (
+              <div className="similar-preview">
+                <p className="muted">展開できる年度 {expandTargetCount}件。</p>
+                <MiniRows title="展開予定の年度と値" rows={expandPreview} columns={['company_year_id', 'field_id', 'value', 'unit']} emptyMessage="展開できる年度はありません（値が確定できませんでした）。" />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="workbench-card">
           <h3>項目名を修正</h3>

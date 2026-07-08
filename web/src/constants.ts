@@ -18,24 +18,20 @@ export const tabs = [
 
 export const tabGroups = [
   {
-    label: 'ホーム',
+    label: 'まず見る',
     items: ['home']
   },
   {
     label: 'データ',
-    items: ['results', 'charts', 'stocks', 'factbooks', 'audit']
+    items: ['results', 'charts', 'stocks', 'factbooks']
   },
   {
-    label: '品質レビュー',
-    items: ['review', 'reconciliation', 'mapping_review', 'algorithm_audit_findings']
-  },
-  {
-    label: '運用',
+    label: '取り込み・更新',
     items: ['run', 'report', 'ai']
   },
   {
-    label: '設定',
-    items: ['concepts', 'fields']
+    label: '詳細設定（上級者向け）',
+    items: ['mapping_review', 'reconciliation', 'review', 'algorithm_audit_findings', 'audit', 'concepts', 'fields']
   }
 ] as const;
 

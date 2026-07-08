@@ -74,6 +74,11 @@ class CellApplySimilarRequest(BaseModel):
     preview: bool = True
 
 
+class CellExpandToYearsRequest(BaseModel):
+    preview: bool = True
+    reviewer: str = "web_cell_workbench"
+
+
 class NotApplicableRequest(BaseModel):
     company_id: str
     field_id: str
@@ -543,6 +548,20 @@ def apply_similar_cell_reviews(company_year_id: str, field_id: str, request: Cel
             review_decision=request.review_decision,
             corrected_value=request.corrected_value,
             reviewer_note=request.reviewer_note,
+            reviewer=request.reviewer,
+            preview=request.preview,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cells/{company_year_id}/{field_id}/expand-to-years")
+def expand_cell_to_other_years(company_year_id: str, field_id: str, request: CellExpandToYearsRequest) -> Dict[str, Any]:
+    try:
+        return cells.expand_to_other_years(
+            PROJECT_ROOT,
+            company_year_id,
+            field_id,
             reviewer=request.reviewer,
             preview=request.preview,
         )

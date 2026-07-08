@@ -9,11 +9,17 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 from yuho_auto_extract.io_utils import read_table
 from yuho_auto_extract.review_queue import REVIEW_COLUMNS
-from yuho_auto_extract.services import field_admin, mapping_review, reviews, semantics_concepts
+from yuho_auto_extract.services import field_admin, mapping_review, reviews, semantics_concepts, source_inference
 
 
 VALID_REVIEW_DECISIONS = {"accept", "correct", "reject", "not_applicable"}
 SIMILAR_SCOPES = {"cell_only", "same_company_all_years", "same_field_all_companies"}
+
+# S1c: 保存直後の自動逆引き対象（受注3項目のみ。恒等式フィッティングが唯一意味を
+# 持つfield。source_inference.FIELD_ROLE_BY_ID のキー全体ではなく、DEFAULT_FIELD_IDS
+# （建築行のroleを持つ最終フィールド。計列roleの building_orders_calc_total 等の内部
+# ロールは含めない）に絞る。
+INFERABLE_FIELD_IDS = set(source_inference.DEFAULT_FIELD_IDS)
 
 
 def save_cell_review(
@@ -47,7 +53,11 @@ def save_cell_review(
     if queue_row is not None:
         if review_decision == "accept" and str(queue_row.get("extracted_value", "")).strip() == "":
             raise ValueError("extracted_value is required when review_decision is accept")
-        return reviews.upsert_resolved_reviews(root, [row])
+        result = reviews.upsert_resolved_reviews(root, [row])
+        resolved_value = corrected_value if review_decision == "correct" else queue_row.get("extracted_value", "")
+        unit = queue_row.get("unit_normalized", "") or ""
+        _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, unit)
+        return result
 
     base = _synthetic_review_row(root, key[0], key[1])
     if review_decision == "accept" and str(base.get("extracted_value", "")).strip() == "":
@@ -67,7 +77,163 @@ def save_cell_review(
     )
     result = _upsert_resolved_rows(root, [base])
     result["synthetic_review_rows"] = 1
+    resolved_value = corrected_value if review_decision == "correct" else base.get("extracted_value", "")
+    unit = base.get("unit_normalized", "") or ""
+    _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, unit)
     return result
+
+
+def _attach_inferred_source_suggestion(
+    root: Path,
+    result: Dict[str, Any],
+    company_year_id: str,
+    field_id: str,
+    review_decision: str,
+    value: Any,
+    unit: str,
+) -> None:
+    """save_cell_review成功直後に、軽量な出典逆引き（raw_text検索のみ・書込みなし）を
+    同期実行し、結果をresult["inferred_source_suggestion"]に同梱する（S1c）。
+
+    受注3項目（INFERABLE_FIELD_IDS）以外、または accept/correct 以外の決定、または
+    出典候補が見つからない場合は None を入れる（提案なし）。保存自体の挙動・書込み経路
+    はここでは一切変えない（付加情報のみ）。
+    """
+    result["inferred_source_suggestion"] = None
+    if review_decision not in ("accept", "correct"):
+        return
+    if field_id not in INFERABLE_FIELD_IDS:
+        return
+    try:
+        numeric_value = float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return
+
+    try:
+        inference = source_inference.infer_source_for_cell(
+            root, company_year_id, field_id, numeric_value, unit=unit or "百万円"
+        )
+    except Exception:
+        # 逆引きはあくまで付加情報。edinet.db未生成等の環境要因で失敗しても
+        # 保存自体（review_resolved.csvへの書込み）は既に完了しているため、
+        # ここでの例外は握りつぶし「提案なし」として扱う。
+        return
+    candidates = inference.get("candidates") or []
+    if not candidates:
+        return
+    top = candidates[0]
+
+    company_id = _company_id_from_company_year(company_year_id)
+    expandable_years = _blank_year_count(root, company_id, field_id, exclude_company_year_id=company_year_id)
+
+    result["inferred_source_suggestion"] = {
+        "company_year_id": company_year_id,
+        "field_id": field_id,
+        "section_name": top.get("section_name"),
+        "role": top.get("role"),
+        "confidence": top.get("confidence"),
+        "snippet": top.get("snippet"),
+        "candidate_block_id": top.get("candidate_block_id"),
+        "expandable_year_count": expandable_years,
+    }
+
+
+def _blank_year_count(root: Path, company_id: str, field_id: str, *, exclude_company_year_id: str = "") -> int:
+    """同じ会社・同じfieldで、まだ値が空白の年度数を数える（展開の見込み表示用の
+    軽量カウント。実際に恒等式が成立するかは expand_to_other_years(preview=True) で確認する）。
+    """
+    if not company_id:
+        return 0
+    rows = read_table(root / "data" / "final" / "final_master_wide.csv")
+    count = 0
+    for row in rows:
+        cy = str(row.get("company_year_id", ""))
+        if not cy or cy == exclude_company_year_id:
+            continue
+        if str(row.get("operating_company_id", "")) != company_id:
+            continue
+        if str(row.get(field_id, "")).strip() == "":
+            count += 1
+    return count
+
+
+def expand_to_other_years(
+    root: Path,
+    company_year_id: str,
+    field_id: str,
+    *,
+    reviewer: str = "web_cell_workbench",
+    preview: bool = True,
+) -> Dict[str, Any]:
+    """指定セルの会社・fieldについて、他年度への展開（出典逆引きの適用）を行う。
+
+    source_inference.build_promotion_plan / apply_promotion_plan の薄いラッパ。
+    build_promotion_plan は全社・全candidate_blocksを対象にするため、ここでは
+    company_year_id から会社IDを取り出し、当該会社・当該fieldの行のみに絞り込んでから
+    apply_promotion_planに渡す（他社への波及を防ぐ・会社スコープを保証する）。
+
+    preview=True（既定）: dry-run。書込みなし。展開予定の年度・値一覧を返す。
+    preview=False: apply_promotion_plan(..., dry_run=False) 経由で実際に書き込む
+      （= reviews.upsert_resolved_reviews のみ・既存値スキップ・空白セルのみ）。
+    戻り値の見た目は apply_similar_reviews に揃える
+      ({"preview", "scope"="company_field", "target_count", "targets"/"changed"})。
+    """
+    company_id = _company_id_from_company_year(company_year_id)
+    if not company_id or not field_id:
+        raise ValueError("company_year_id and field_id are required")
+
+    field_ids = [field_id] if field_id in source_inference.DEFAULT_FIELD_IDS else source_inference.DEFAULT_FIELD_IDS
+    full_plan = source_inference.build_promotion_plan(root, field_ids=field_ids)
+
+    def _scoped(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return [
+            entry
+            for entry in entries
+            if entry.get("field_id") == field_id
+            and _company_id_from_company_year(str(entry.get("company_year_id", ""))) == company_id
+        ]
+
+    scoped_promote = _scoped(full_plan.get("promote") or [])
+    scoped_candidate = _scoped(full_plan.get("candidate_single_year") or [])
+    scoped_plan = {
+        "promote": scoped_promote,
+        "candidate_single_year": scoped_candidate,
+        "suspect_existing_values": _scoped(full_plan.get("suspect_existing_values") or []),
+        "field_ids": [field_id],
+    }
+
+    targets = [
+        {
+            "company_year_id": entry["company_year_id"],
+            "field_id": entry["field_id"],
+            "value": entry["value"],
+            "unit": entry.get("unit", ""),
+            "evidence": entry.get("evidence", {}),
+        }
+        for entry in scoped_promote
+    ]
+
+    if preview:
+        return {
+            "preview": True,
+            "scope": "company_field",
+            "company_id": company_id,
+            "field_id": field_id,
+            "target_count": len(targets),
+            "targets": targets,
+        }
+
+    apply_result = source_inference.apply_promotion_plan(root, scoped_plan, dry_run=False)
+    return {
+        "preview": False,
+        "scope": "company_field",
+        "company_id": company_id,
+        "field_id": field_id,
+        "target_count": len(targets),
+        "changed": apply_result.get("applied", 0),
+        "targets": targets,
+        "apply_result": apply_result,
+    }
 
 
 def update_cell_field_name(root: Path, field_id: str, field_name_ja: str) -> Dict[str, Any]:

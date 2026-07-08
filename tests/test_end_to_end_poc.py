@@ -43,6 +43,50 @@ class EndToEndPocContractTests(unittest.TestCase):
         self.assertEqual(final[0]["review_status"], "unreviewed")
         self.assertEqual(filter_exportable_rows(final), [])
 
+    def test_corrected_review_without_extracted_row_is_exported(self):
+        reviewed = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "building_orders_total",
+                "field_name_ja": "建築受注高_合計",
+                "review_decision": "correct",
+                "corrected_value": "1000",
+                "unit_normalized": "百万円",
+                "reviewer": "web_cell_workbench",
+            }
+        ]
+
+        final = apply_review_decisions([], reviewed)
+        exportable = filter_exportable_rows(final)
+        wide = build_wide_values(
+            exportable,
+            [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024"}],
+            [{"field_id": "building_orders_total", "field_name_ja": "建築受注高_合計"}],
+        )
+
+        self.assertEqual(len(exportable), 1)
+        self.assertEqual(exportable[0]["value"], "1000")
+        self.assertEqual(exportable[0]["review_status"], "corrected")
+        self.assertEqual(wide[0]["building_orders_total"], "1000")
+
+    def test_accept_review_without_extracted_row_uses_review_value(self):
+        reviewed = [
+            {
+                "company_year_id": "A_2024",
+                "field_id": "roe",
+                "review_decision": "accept",
+                "extracted_value": "8.2",
+                "unit_normalized": "%",
+            }
+        ]
+
+        final = apply_review_decisions([], reviewed)
+        exportable = filter_exportable_rows(final)
+
+        self.assertEqual(len(exportable), 1)
+        self.assertEqual(exportable[0]["value"], "8.2")
+        self.assertEqual(exportable[0]["review_status"], "approved")
+
     def test_wide_values_prefers_field_preferred_method_when_multiple_sources_agree(self):
         rows = [
             {

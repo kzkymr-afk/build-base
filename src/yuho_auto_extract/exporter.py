@@ -25,8 +25,10 @@ REQUIRED_AUDIT_COLUMNS = [
 def apply_review_decisions(extracted_rows: Iterable[Dict[str, Any]], reviewed_rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     reviewed = {(str(row.get("company_year_id")), str(row.get("field_id"))): row for row in reviewed_rows}
     final: List[Dict[str, Any]] = []
+    seen_keys = set()
     for row in extracted_rows:
         key = (str(row.get("company_year_id")), str(row.get("field_id")))
+        seen_keys.add(key)
         review = reviewed.get(key)
         copied = dict(row)
         if review:
@@ -55,7 +57,54 @@ def apply_review_decisions(extracted_rows: Iterable[Dict[str, Any]], reviewed_ro
                 copied.setdefault("review_status", "auto_accepted")
         if copied.get("review_status") not in {"rejected", "not_applicable"}:
             final.append(copied)
+    for key, review in reviewed.items():
+        if key in seen_keys:
+            continue
+        synthetic = _synthetic_reviewed_row(review)
+        if synthetic is not None:
+            final.append(synthetic)
     return final
+
+
+def _synthetic_reviewed_row(review: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    decision = str(review.get("review_decision", "")).strip().lower()
+    if decision in {"reject", "not_applicable"}:
+        return None
+    if decision == "correct":
+        value = review.get("corrected_value")
+        review_status = "corrected"
+    elif decision == "accept":
+        value = review.get("corrected_value")
+        if is_blankish(value):
+            value = review.get("extracted_value")
+        review_status = "approved"
+    else:
+        return None
+    if is_blankish(value):
+        return None
+    return {
+        "company_year_id": review.get("company_year_id", ""),
+        "field_id": review.get("field_id", ""),
+        "field_name_ja": review.get("field_name_ja", ""),
+        "value": value,
+        "value_normalized": value,
+        "unit_normalized": review.get("unit_normalized", ""),
+        "data_scope": review.get("data_scope", ""),
+        "source_segment_label": review.get("source_segment_label", ""),
+        "normalized_segment_key": review.get("normalized_segment_key", ""),
+        "segment_taxonomy_status": review.get("segment_taxonomy_status", ""),
+        "applies_to_company_id": review.get("applies_to_company_id", ""),
+        "field_creation_reason": review.get("field_creation_reason", ""),
+        "source_doc_id": review.get("source_doc_id", ""),
+        "source_file": review.get("source_file", "review_resolved.csv") or "review_resolved.csv",
+        "source_heading": review.get("source_heading", ""),
+        "source_quote": review.get("source_quote", ""),
+        "extraction_method": "MANUAL",
+        "confidence": review.get("confidence", ""),
+        "validation_status": review.get("validation_status", "pass") or "pass",
+        "review_status": review_status,
+        "review_required": False,
+    }
 
 
 def filter_exportable_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
