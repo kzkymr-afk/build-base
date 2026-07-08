@@ -124,16 +124,42 @@ export function DataTable({
               ].filter(Boolean).join(' ')}
               onClick={() => onRowClick?.(row.original)}
             >
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className={onCellClick ? 'cell-clickable' : ''} onClick={(event) => {
-                  if (onCellClick) {
-                    event.stopPropagation();
-                    onCellClick(row.original, cell.column.id);
+              {row.getVisibleCells().map((cell) => {
+                const interactiveCell = Boolean(onCellClick && !baseColumns.has(cell.column.id));
+                const status = String(row.original.company_year_id || '')
+                  ? cellStatuses?.[String(row.original.company_year_id || '')]?.[cell.column.id]
+                  : undefined;
+                const openCell = () => {
+                  if (interactiveCell) {
+                    onCellClick?.(row.original, cell.column.id);
                   }
-                }}>
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
+                };
+                return (
+                  <td
+                    key={cell.id}
+                    className={interactiveCell ? 'cell-clickable' : ''}
+                    title={interactiveCell ? `セル作業を開く: ${columnLabels[cell.column.id] || cell.column.id}${status?.status_label ? `（${status.status_label}）` : ''}` : undefined}
+                    role={interactiveCell ? 'button' : undefined}
+                    tabIndex={interactiveCell ? 0 : undefined}
+                    onClick={(event) => {
+                      if (interactiveCell) {
+                        event.stopPropagation();
+                        openCell();
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (!interactiveCell) return;
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        openCell();
+                      }
+                    }}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

@@ -1011,10 +1011,31 @@ tbody tr:hover {
 
 .cell-clickable {
   cursor: pointer;
+  position: relative;
+  outline: 1px solid transparent;
+  outline-offset: -2px;
+  transition: background 120ms ease, outline-color 120ms ease, box-shadow 120ms ease;
 }
 
-.cell-clickable:hover {
+.cell-clickable:hover,
+.cell-clickable:focus-visible {
   background: var(--primary-soft);
+  outline-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.cell-clickable .cell-status-dot::after {
+  content: "→";
+  margin-left: 5px;
+  opacity: 0;
+  transform: translateX(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.cell-clickable:hover .cell-status-dot::after,
+.cell-clickable:focus-visible .cell-status-dot::after {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .empty-cell,
