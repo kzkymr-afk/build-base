@@ -686,6 +686,7 @@ function HomeDashboardPanel({
   const [regression, setRegression] = React.useState<RegressionSummary | null>(null);
   const [goldenSummary, setGoldenSummary] = React.useState<GoldenSummary | null>(null);
   const [automation, setAutomation] = React.useState<AutomationStatus | null>(null);
+  const [corroborationSummary, setCorroborationSummary] = React.useState<CorroborationSummary | null>(null);
   const [error, setError] = React.useState('');
   const jobRunning = job?.status === 'running';
 
@@ -693,6 +694,7 @@ function HomeDashboardPanel({
     api<RegressionSummary>('/api/regression/summary').then(setRegression).catch((err) => setError(String(err)));
     api<GoldenSummary>('/api/golden/summary').then(setGoldenSummary).catch((err) => setError(String(err)));
     api<AutomationStatus>('/api/automation/status').then(setAutomation).catch((err) => setError(String(err)));
+    api<CorroborationSummary>('/api/corroboration/summary').then(setCorroborationSummary).catch((err) => setError(String(err)));
   }, []);
 
   React.useEffect(() => {
@@ -719,6 +721,7 @@ function HomeDashboardPanel({
   const regressionPass = regression?.pass === true;
   const regressionBuilt = regression?.status !== 'not_built' && regression != null;
   const files = status?.files || {};
+  const weakEvidenceCount = corroborationSummary?.auto_accepted_with_zero_corroboration;
 
   return (
     <section className="stack dashboard-home">
@@ -740,6 +743,11 @@ function HomeDashboardPanel({
           <small>レビュー残</small>
           <strong>{automation?.review_gate.active_review_items ?? '-'}</strong>
           <span>未反映 {automation?.review_gate.saved_unapplied_reviews ?? '-'}</span>
+        </div>
+        <div className="panel metric-panel">
+          <small>根拠弱い値</small>
+          <strong className={(weakEvidenceCount || 0) > 0 ? 'text-warn' : 'text-ok'}>{weakEvidenceCount ?? '-'}</strong>
+          <span>自動確定だが照合0件</span>
         </div>
         <div className="panel metric-panel">
           <small>監査</small>
