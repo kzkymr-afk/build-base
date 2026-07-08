@@ -150,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("regression-check")
     p.add_argument("--mode", choices=["light", "full"], default="light")
     p.set_defaults(handler=cmd_regression_check)
+    p = sub.add_parser("audit-state-consistency")
+    p.add_argument("--sample-limit", type=int, default=10)
+    p.add_argument("--json-output", default="data/reports/state_consistency_audit.json")
+    p.add_argument("--markdown-output", default="data/reports/state_consistency_audit.md")
+    p.add_argument("--no-preview", action="store_true")
+    p.add_argument("--no-static", action="store_true")
+    p.add_argument("--fail-on", choices=["P0", "P1", "P2", "P3"], default="")
+    p.set_defaults(handler=cmd_audit_state_consistency)
     p = sub.add_parser("enrich-field-definition")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
     p.add_argument("--apply", dest="dry_run", action="store_false")
@@ -827,6 +835,37 @@ def cmd_regression_check(root: Path, args: argparse.Namespace) -> int:
     for key in sorted(summary):
         print(f"{key}={summary[key]}")
     return 0 if summary.get("pass") else 1
+
+
+def cmd_audit_state_consistency(root: Path, args: argparse.Namespace) -> int:
+    from .services import state_consistency
+
+    result = state_consistency.run_state_consistency_audit(
+        root,
+        sample_limit=args.sample_limit,
+        include_preview=not args.no_preview,
+        include_static=not args.no_static,
+    )
+    outputs = state_consistency.write_audit_outputs(
+        result,
+        json_path=root / args.json_output if args.json_output else None,
+        markdown_path=root / args.markdown_output if args.markdown_output else None,
+    )
+    print(f"status={result['status']}")
+    print(f"p0_p1_count={result['p0_p1_count']}")
+    print(f"finding_count={result['finding_count']}")
+    for severity, count in sorted((result.get("severity_counts") or {}).items()):
+        print(f"severity_{severity}={count}")
+    for key, value in outputs.items():
+        print(f"{key}={value}")
+    if args.fail_on:
+        threshold = state_consistency.FINDING_ORDER[args.fail_on]
+        has_blocking = any(
+            state_consistency.FINDING_ORDER.get(str(finding.get("severity")), 99) <= threshold
+            for finding in result.get("findings") or []
+        )
+        return 1 if has_blocking else 0
+    return 0
 
 
 def cmd_enrich_field_definition(root: Path, args: argparse.Namespace) -> int:
