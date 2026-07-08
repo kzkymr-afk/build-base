@@ -24,6 +24,7 @@ export function DataTable({
   markEmptyCells = false,
   cellStatuses,
   clampAllCells = false,
+  highlightStatus = '',
   formatCellText,
   renderCellValue,
   renderClampedText
@@ -43,6 +44,7 @@ export function DataTable({
   markEmptyCells?: boolean;
   cellStatuses?: Record<string, Record<string, CellStatus>>;
   clampAllCells?: boolean;
+  highlightStatus?: string;
   formatCellText?: (column: string, value: unknown) => string;
   renderCellValue: (column: string, value: unknown) => React.ReactNode;
   renderClampedText: (value: unknown, className?: string) => React.ReactNode;
@@ -131,6 +133,7 @@ export function DataTable({
                 const status = String(row.original.company_year_id || '')
                   ? cellStatuses?.[String(row.original.company_year_id || '')]?.[cell.column.id]
                   : undefined;
+                const statusMatchesFilter = Boolean(highlightStatus && status?.status === highlightStatus);
                 const openCell = () => {
                   if (interactiveCell) {
                     onCellClick?.(row.original, cell.column.id);
@@ -139,7 +142,10 @@ export function DataTable({
                 return (
                   <td
                     key={cell.id}
-                    className={interactiveCell ? 'cell-clickable' : ''}
+                    className={[
+                      interactiveCell ? 'cell-clickable' : '',
+                      statusMatchesFilter ? 'cell-status-match' : ''
+                    ].filter(Boolean).join(' ')}
                     title={interactiveCell ? `セル作業を開く: ${columnLabels[cell.column.id] || cell.column.id}${status?.status_label ? `（${status.status_label}）` : ''}` : undefined}
                     role={interactiveCell ? 'button' : undefined}
                     tabIndex={interactiveCell ? 0 : undefined}

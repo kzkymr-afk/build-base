@@ -1511,6 +1511,7 @@ function ResultsPanel({
             columnLabels={fieldLabels}
             markEmptyCells
             cellStatuses={data.cell_statuses}
+            highlightStatus={cellStatus}
             compact
             onCellClick={openCellDetail}
           />
