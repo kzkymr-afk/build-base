@@ -459,6 +459,14 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         next_action=next_action,
         resolution_row=fact_resolution,
     )
+    zero_corroboration_row = _read_zero_corroboration_cells(root).get((company_year_id, field_id), {})
+    status, status_label, summary, next_action = _apply_zero_corroboration_status(
+        status=status,
+        status_label=status_label,
+        summary=summary,
+        next_action=next_action,
+        zero_corroboration_row=zero_corroboration_row,
+    )
     review_state = _review_state(current_value=current_value, review_rows=review_rows, resolved_rows=resolved_rows)
     mappings = _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows)
     return {
@@ -522,6 +530,7 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
         resolved_by_key.setdefault(key, []).append(row)
     failures = _run_report_failures(root)
     resolutions = _read_cell_resolutions(root)
+    weak_evidence = _read_zero_corroboration_cells(root)
     out: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for row in rows:
         company_year_id = str(row.get("company_year_id", ""))
@@ -547,6 +556,13 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
                 summary=summary,
                 next_action=next_action,
                 resolution_row=resolution_row,
+            )
+            status, label, summary, next_action = _apply_zero_corroboration_status(
+                status=status,
+                status_label=label,
+                summary=summary,
+                next_action=next_action,
+                zero_corroboration_row=weak_evidence.get(key, {}),
             )
             resolution = str(resolution_row.get("resolution") or "")
             out[company_year_id][field_id] = {
@@ -612,6 +628,43 @@ def _apply_corroboration_status(
         "照合要確認",
         "最終結果に値がありますが、照合結果が自動確定条件を満たしていません。",
         "候補と根拠チェーンを確認し、妥当ならこの値を維持、違う場合はこのセルから修正してください。",
+    )
+
+
+def _read_zero_corroboration_cells(root: Path) -> Dict[tuple[str, str], Dict[str, Any]]:
+    path = root / "data" / "reports" / "corroboration_cells.csv"
+    if not path.exists():
+        return {}
+    out: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for row in read_table(path):
+        company_year_id = str(row.get("company_year_id") or "")
+        field_id = str(row.get("field_id") or "")
+        if not company_year_id or not field_id:
+            continue
+        if _truthy(row.get("review_required")):
+            continue
+        corroboration_count = _to_int(row.get("corroboration_count"))
+        conflict_count = _to_int(row.get("conflict_count"))
+        if corroboration_count == 0 and conflict_count == 0:
+            out[(company_year_id, field_id)] = row
+    return out
+
+
+def _apply_zero_corroboration_status(
+    *,
+    status: str,
+    status_label: str,
+    summary: str,
+    next_action: str,
+    zero_corroboration_row: Dict[str, Any],
+) -> tuple[str, str, str, str]:
+    if status not in {"value_present", "value_present_no_audit", "corroboration_needs_review"} or not zero_corroboration_row:
+        return status, status_label, summary, next_action
+    return (
+        "corroboration_weak",
+        "根拠弱い",
+        "最終結果に値はありますが、独立した数値照合は0件です。",
+        "重要な比較に使う前に、セル作業で根拠チェーンを確認してください。",
     )
 
 
@@ -1182,6 +1235,19 @@ def _first_nonblank(rows: Sequence[Dict[str, Any]], key: str) -> str:
 
 def _is_blank(value: Any) -> bool:
     return is_blankish(value)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if is_blankish(value):
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
+def _to_int(value: Any) -> int:
+    number = _to_number(value)
+    return int(number) if number is not None else 0
 
 
 def _to_number(value: Any) -> Optional[float]:

@@ -1441,6 +1441,7 @@ tbody tr:hover {
 }
 
 .status-corroboration_conflicted,
+.status-corroboration_weak,
 .status-corroboration_needs_review,
 .status-corroboration_needs_reconciliation,
 .status-value_present_no_audit,

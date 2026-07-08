@@ -199,6 +199,71 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(status["candidate_count"], 1)
             self.assertTrue(result["rows"][0]["roe"] == "")
 
+    def test_wide_results_mark_auto_accepted_zero_corroboration_as_weak_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": "0.082"}],
+            )
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [{"company_year_id": "A_2024", "field_id": "roe", "value": "0.082", "validation_status": "ok"}],
+            )
+            write_table(
+                root / "data" / "reports" / "corroboration_cells.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "roe",
+                        "review_required": "false",
+                        "corroboration_count": "0",
+                        "conflict_count": "0",
+                    }
+                ],
+            )
+
+            wide = read_wide(root, fields=["roe"])
+            detail = read_cell_detail(root, "A_2024", "roe")
+
+            wide_status = wide["cell_statuses"]["A_2024"]["roe"]
+            self.assertEqual(wide_status["status"], "corroboration_weak")
+            self.assertEqual(wide_status["status_label"], "根拠弱い")
+            self.assertEqual(detail["status"], "corroboration_weak")
+            self.assertIn("独立した数値照合は0件", detail["summary"])
+
+    def test_zero_corroboration_does_not_override_existing_review_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(root / "config" / "company_master.csv", [{"operating_company_id": "A", "operating_company_name": "A社"}])
+            write_table(root / "config" / "field_definition.csv", [{"field_id": "roe", "field_name_ja": "ROE", "target_unit": "%"}])
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "A_2024", "operating_company_id": "A", "fiscal_year": "2024", "roe": "0.082"}],
+            )
+            write_table(
+                root / "data" / "final" / "source_audit.csv",
+                [{"company_year_id": "A_2024", "field_id": "roe", "value": "0.082", "validation_status": "ok"}],
+            )
+            write_table(
+                root / "data" / "reports" / "corroboration_cells.csv",
+                [
+                    {
+                        "company_year_id": "A_2024",
+                        "field_id": "roe",
+                        "review_required": "true",
+                        "corroboration_count": "0",
+                        "conflict_count": "0",
+                    }
+                ],
+            )
+
+            wide = read_wide(root, fields=["roe"])
+
+            self.assertEqual(wide["cell_statuses"]["A_2024"]["roe"]["status"], "value_present")
+
     def test_cell_detail_exposes_workbench_sections(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
