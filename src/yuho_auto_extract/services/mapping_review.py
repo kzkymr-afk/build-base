@@ -288,7 +288,8 @@ def bulk_reject_conflicting_proposals(
     for row, dto in zip(proposed, dtos):
         corr = dto.get("corroboration") or {}
         overlap = int(corr.get("overlap_count") or 0)
-        rate = float(corr.get("match_rate") or 1.0)
+        raw_rate = corr.get("match_rate")
+        rate = float(raw_rate) if raw_rate not in (None, "") else 1.0
         if overlap >= min_overlap and rate <= max_match_rate:
             candidates.append((row, dto, corr))
 
