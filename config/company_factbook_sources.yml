@@ -270,6 +270,18 @@ company_document_sources:
     source_page_url: https://www.ad-hzm.co.jp/ir/factbook/
     source_dataset_id: ando_hazama_factbook
     source_doc_type: factbook
+    parse_documents: true
+    scope: standalone
+    business_scope: building_orders
+    follow_links: false
+    link_text_includes:
+      - FACT BOOK
+      - Fact Book
+      - ファクトブック
+    href_includes:
+      - factbook
+    parse_file_name_includes:
+      - factbook
 
   - id: penta_factbook_documents
     company_id: PENTA

@@ -460,6 +460,7 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
     if wide_row is not None:
         wide_row = _with_derived_values(wide_row, [field_id])
     current_value = "" if wide_row is None else str(wide_row.get(field_id, "") or "")
+    factbook_candidates = _read_factbook_cell_candidates(root).get((company_year_id, field_id), [])
 
     status, status_label, summary, next_action = _classify_cell(
         value=current_value,
@@ -486,7 +487,19 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         next_action=next_action,
         zero_corroboration_row=zero_corroboration_row,
     )
-    review_state = _review_state(current_value=current_value, review_rows=review_rows, resolved_rows=resolved_rows)
+    status, status_label, summary, next_action = _apply_factbook_candidate_status(
+        status=status,
+        status_label=status_label,
+        summary=summary,
+        next_action=next_action,
+        candidates=factbook_candidates,
+    )
+    review_state = _review_state(
+        current_value=current_value,
+        review_rows=review_rows,
+        resolved_rows=resolved_rows,
+        additional_candidate_count=len(factbook_candidates),
+    )
     mappings = _read_semantics_source_chain(root, company_year_id, field_id, resolved_rows)
     return {
         "company_year_id": company_year_id,
@@ -504,7 +517,7 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
         "summary": summary,
         "next_action": next_action,
         "has_source_audit": bool(audit_rows),
-        "has_review_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows),
+        "has_review_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows) or bool(factbook_candidates),
         "failure_reason": failure_reason,
         "current": {
             "value": current_value,
@@ -513,7 +526,7 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
             "status_label": status_label,
         },
         "review_state": review_state,
-        "candidates": _cell_candidates(review_rows, audit_rows),
+        "candidates": _cell_candidates(review_rows, audit_rows, factbook_candidates),
         "mapping_state": _mapping_state(mappings),
         "similar_scope_counts": _similar_scope_counts(root, company_year_id, field_id),
         "actions_available": _cell_actions_available(
@@ -521,6 +534,7 @@ def read_cell_detail(root: Path, company_year_id: str, field_id: str) -> Dict[st
             review_rows=review_rows,
             resolved_rows=resolved_rows,
             mappings=mappings,
+            factbook_candidates=factbook_candidates,
         ),
         "wide_row": wide_row or {},
         "audit_rows": audit_rows[:20],
@@ -550,6 +564,7 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
     failures = _run_report_failures(root)
     resolutions = _read_cell_resolutions(root)
     weak_evidence = _read_zero_corroboration_cells(root)
+    factbook_candidates = _read_factbook_cell_candidates(root)
     out: Dict[str, Dict[str, Dict[str, Any]]] = {}
     for row in rows:
         company_year_id = str(row.get("company_year_id", ""))
@@ -583,6 +598,13 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
                 next_action=next_action,
                 zero_corroboration_row=weak_evidence.get(key, {}),
             )
+            status, label, summary, next_action = _apply_factbook_candidate_status(
+                status=status,
+                status_label=label,
+                summary=summary,
+                next_action=next_action,
+                candidates=factbook_candidates.get(key, []),
+            )
             resolution = str(resolution_row.get("resolution") or "")
             out[company_year_id][field_id] = {
                 "status": status,
@@ -591,7 +613,7 @@ def _cell_statuses_for_rows(root: Path, rows: Sequence[Dict[str, Any]], field_id
                 "next_action": next_action,
                 "review_saved": bool(resolved_rows),
                 "applied_status": str(resolved_rows[0].get("applied_status", "")) if resolved_rows else "",
-                "candidate_count": len(review_rows),
+                "candidate_count": len(review_rows) + len(factbook_candidates.get(key, [])),
                 "has_source_audit": key in audit_keys,
                 "resolution": resolution,
             }
@@ -687,7 +709,85 @@ def _apply_zero_corroboration_status(
     )
 
 
-def _review_state(*, current_value: str, review_rows: Sequence[Dict[str, Any]], resolved_rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def _apply_factbook_candidate_status(
+    *,
+    status: str,
+    status_label: str,
+    summary: str,
+    next_action: str,
+    candidates: Sequence[Dict[str, Any]],
+) -> tuple[str, str, str, str]:
+    if not candidates or status not in {
+        "blank_no_candidate",
+        "blank_review_needs_rule",
+        "blank_with_source_audit",
+    }:
+        return status, status_label, summary, next_action
+    return (
+        "factbook_candidate",
+        "Factbook候補あり",
+        "有価証券報告書には値がありませんが、公式Factbookに補完候補があります。",
+        "候補の年度・単位・対象範囲と引用を確認し、正しければこのセルへ採用してください。",
+    )
+
+
+def _read_factbook_cell_candidates(root: Path) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+    path = root / "data" / "reports" / "company_factbook_yuho_validation.csv"
+    if not path.exists():
+        return {}
+    out: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    seen: Dict[tuple[str, str], set[tuple[str, str]]] = {}
+    for row in read_table(path):
+        if str(row.get("validation_status") or "") != "missing_yuho_value":
+            continue
+        company_id = str(row.get("company_id") or "")
+        fiscal_year = str(row.get("fiscal_year") or "")
+        field_id = str(row.get("yuho_field_id") or "")
+        value = row.get("factbook_group_total_million_yen") or row.get("factbook_amount_million_yen")
+        if not company_id or not fiscal_year or not field_id or _is_blank(value):
+            continue
+        key = (f"{company_id}_{fiscal_year}", field_id)
+        source_dataset_id = str(row.get("source_dataset_id") or "")
+        signature = (source_dataset_id, str(value))
+        if signature in seen.setdefault(key, set()):
+            continue
+        seen[key].add(signature)
+        source_file = str(row.get("source_file") or "")
+        source_url = str(row.get("source_url") or "")
+        extension = Path(source_file).suffix.lower()
+        extraction_method = "FACTBOOK_XLS" if extension in {".xls", ".xlsx", ".xlsm"} else "FACTBOOK_PDF"
+        quote = str(row.get("source_quote") or "")
+        if str(row.get("validation_basis") or "") == "use_category_sum":
+            quote = f"用途別受注の合計 {value}百万円" + (f" / {quote}" if quote else "")
+        out.setdefault(key, []).append(
+            {
+                "company_year_id": key[0],
+                "field_id": field_id,
+                "extracted_value": value,
+                "unit_normalized": "百万円",
+                "data_scope": row.get("scope", ""),
+                "source_doc_id": source_dataset_id,
+                "source_dataset_id": source_dataset_id,
+                "source_file": source_file or source_url,
+                "source_url": source_url,
+                "source_heading": row.get("use_category_label") or row.get("source_metric_id", ""),
+                "source_quote": quote,
+                "extraction_method": extraction_method,
+                "confidence": "0.9",
+                "validation_status": "pass",
+                "review_reason": "factbook_candidate",
+            }
+        )
+    return out
+
+
+def _review_state(
+    *,
+    current_value: str,
+    review_rows: Sequence[Dict[str, Any]],
+    resolved_rows: Sequence[Dict[str, Any]],
+    additional_candidate_count: int = 0,
+) -> Dict[str, Any]:
     saved = bool(resolved_rows)
     latest = resolved_rows[0] if resolved_rows else {}
     return {
@@ -698,13 +798,17 @@ def _review_state(*, current_value: str, review_rows: Sequence[Dict[str, Any]], 
         "applied_value": str(latest.get("applied_value", "")),
         "applied_at": str(latest.get("applied_at", "")),
         "reviewed_at": str(latest.get("reviewed_at", "")),
-        "candidate_count": len(review_rows),
+        "candidate_count": len(review_rows) + additional_candidate_count,
         "saved_not_applied": saved and str(latest.get("applied_status", "")).strip().lower() not in {"applied", "rejected", "not_applicable"},
         "final_value_present": not _is_blank(current_value),
     }
 
 
-def _cell_candidates(review_rows: Sequence[Dict[str, Any]], audit_rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _cell_candidates(
+    review_rows: Sequence[Dict[str, Any]],
+    audit_rows: Sequence[Dict[str, Any]],
+    factbook_rows: Sequence[Dict[str, Any]] = (),
+) -> List[Dict[str, Any]]:
     candidates: List[Dict[str, Any]] = []
     for index, row in enumerate(review_rows[:20]):
         candidates.append({
@@ -728,6 +832,18 @@ def _cell_candidates(review_rows: Sequence[Dict[str, Any]], audit_rows: Sequence
             "reason": row.get("validation_status", ""),
             "confidence": row.get("confidence", ""),
             "source_quote": row.get("source_quote", ""),
+        })
+    for index, row in enumerate(factbook_rows[:20]):
+        candidates.append({
+            "candidate_id": f"factbook:{index}",
+            "source": "factbook",
+            "value": row.get("extracted_value", ""),
+            "unit": row.get("unit_normalized", "百万円"),
+            "reason": "公式Factbook候補",
+            "confidence": row.get("confidence", ""),
+            "source_quote": row.get("source_quote", ""),
+            "source_url": row.get("source_url", ""),
+            "source_dataset_id": row.get("source_dataset_id", ""),
         })
     return candidates
 
@@ -774,10 +890,17 @@ def _similar_samples(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ]
 
 
-def _cell_actions_available(*, current_value: str, review_rows: Sequence[Dict[str, Any]], resolved_rows: Sequence[Dict[str, Any]], mappings: Dict[str, Any]) -> Dict[str, bool]:
+def _cell_actions_available(
+    *,
+    current_value: str,
+    review_rows: Sequence[Dict[str, Any]],
+    resolved_rows: Sequence[Dict[str, Any]],
+    mappings: Dict[str, Any],
+    factbook_candidates: Sequence[Dict[str, Any]] = (),
+) -> Dict[str, bool]:
     mapping_state = _mapping_state(mappings)
     return {
-        "accept_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows),
+        "accept_candidate": any(not _is_blank(row.get("extracted_value", "")) for row in review_rows) or bool(factbook_candidates),
         "manual_correct": True,
         "reject_candidate": bool(review_rows or resolved_rows),
         "not_applicable": True,

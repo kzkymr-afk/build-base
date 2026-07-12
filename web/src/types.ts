@@ -217,6 +217,7 @@ export type FactbookValidationSummary = {
   by_source_metric_id?: Record<string, number>;
   by_status_category?: Record<string, Record<string, number>>;
   top_no_mapping_categories?: Row[];
+  top_factbook_only_categories?: Row[];
   top_missing_yuho_fields?: Row[];
   pending_samples?: Row[];
   output_path?: string;

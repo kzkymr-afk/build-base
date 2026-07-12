@@ -5,7 +5,7 @@ import contextlib
 import io
 import os
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence
 
 from yuho_auto_extract import __main__ as cli
 from yuho_auto_extract.io_utils import prefer_existing_table, read_table, write_table
@@ -209,12 +209,19 @@ def refresh_company_factbooks(
     log: Optional[LogCallback] = None,
     force: bool = False,
     dry_run: bool = False,
+    company_ids: Optional[Sequence[str]] = None,
 ) -> int:
     """Fetch configured company factbook/data book sources and merge the pilot mart."""
     _prepare(root)
     from yuho_auto_extract.services import company_factbooks
 
-    summary = company_factbooks.refresh_company_factbooks(root, force=force, dry_run=dry_run, log=log)
+    summary = company_factbooks.refresh_company_factbooks(
+        root,
+        force=force,
+        dry_run=dry_run,
+        log=log,
+        company_ids=company_ids,
+    )
     status = str(summary.get("status") or "")
     return 0 if status in {"succeeded", "partial_success", "dry_run"} else 1
 

@@ -126,13 +126,18 @@ VALIDATION_COLUMNS = [
 ]
 
 DEFAULT_FACTBOOK_YUHO_FIELD_MAP = {
-    ("business_scope", "domestic_building"): "segment_orders_domestic_building",
-    ("business_scope", "domestic_civil"): "segment_orders_domestic_civil",
-    ("business_scope", "overseas_building"): "segment_orders_overseas_building",
-    ("business_scope", "overseas_civil"): "segment_orders_overseas_civil",
-    ("business_scope", "overseas_construction"): "segment_orders_overseas_construction",
-    ("business_scope", "building"): "segment_orders_building",
-    ("business_scope", "civil"): "segment_orders_civil",
+    ("standalone", "business_scope", "building"): "building_orders_total",
+    ("standalone", "business_scope", "domestic_building"): "domestic_building_orders_total",
+    ("standalone", "business_scope", "government_building"): "building_orders_government",
+    ("standalone", "business_scope", "private_building"): "building_orders_private",
+    ("standalone", "business_scope", "overseas_building"): "building_orders_overseas",
+    ("segment", "business_scope", "domestic_building"): "segment_orders_domestic_building",
+    ("segment", "business_scope", "domestic_civil"): "segment_orders_domestic_civil",
+    ("segment", "business_scope", "overseas_building"): "segment_orders_overseas_building",
+    ("segment", "business_scope", "overseas_civil"): "segment_orders_overseas_civil",
+    ("segment", "business_scope", "overseas_construction"): "segment_orders_overseas_construction",
+    ("segment", "business_scope", "building"): "segment_orders_building",
+    ("segment", "business_scope", "civil"): "segment_orders_civil",
 }
 
 
@@ -508,7 +513,18 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
     validation_cfg = cfg.get("validation") or {}
     tolerance_abs = _config_float(validation_cfg, "absolute_tolerance_million_yen", 100)
     tolerance_pct = _config_float(validation_cfg, "relative_tolerance", 0.005)
-    aggregate_checks = _build_use_aggregate_checks(rows, wide_by_company_year, tolerance_abs, tolerance_pct)
+    result_fiscal_years = {
+        str(row.get("fiscal_year") or "")
+        for row in wide_rows
+        if str(row.get("fiscal_year") or "")
+    }
+    aggregate_checks = _build_use_aggregate_checks(
+        rows,
+        wide_by_company_year,
+        tolerance_abs,
+        tolerance_pct,
+        result_fiscal_years=result_fiscal_years,
+    )
 
     validation_rows: List[Dict[str, Any]] = []
     for row in rows:
@@ -521,6 +537,7 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
                 tolerance_abs,
                 tolerance_pct,
                 aggregate_checks=aggregate_checks,
+                result_fiscal_years=result_fiscal_years,
             )
         )
 
@@ -537,7 +554,11 @@ def validate_factbook_against_yuho(root: Path, output_path: Optional[Path] = Non
     validated_path = _validated_factbook_path(root)
     write_table(validated_path, validated_rows)
     validated_json_path = _write_json_sidecar(validated_path, validated_rows)
-    pending_rows = [row for row in validation_output_rows if str(row.get("validation_status") or "") not in {"pass", "forecast_not_checked"}]
+    pending_rows = [
+        row
+        for row in validation_output_rows
+        if str(row.get("validation_status") or "") not in {"pass", "forecast_not_checked", "outside_result_period", "factbook_only"}
+    ]
     pending_path = root / "data" / "reports" / "company_factbook_pending_rows.csv"
     write_table(pending_path, pending_rows)
     pending_json_path = _write_json_sidecar(pending_path, pending_rows)
@@ -599,6 +620,7 @@ def factbook_validation_summary(root: Path, sample_limit: int = 12) -> Dict[str,
             "by_source_metric_id": {},
             "by_status_category": {},
             "top_no_mapping_categories": [],
+            "top_factbook_only_categories": [],
             "top_missing_yuho_fields": [],
             "pending_samples": [],
         }
@@ -616,8 +638,10 @@ def factbook_validation_summary(root: Path, sample_limit: int = 12) -> Dict[str,
         by_status_category[status][category_type] = by_status_category[status].get(category_type, 0) + 1
 
     no_mapping_rows = [row for row in rows if str(row.get("validation_status") or "") == "no_mapping"]
+    factbook_only_rows = [row for row in rows if str(row.get("validation_status") or "") == "factbook_only"]
     missing_value_rows = [row for row in rows if str(row.get("validation_status") or "") == "missing_yuho_value"]
     top_no_mapping_categories = _top_row_groups(no_mapping_rows, ["category_type", "use_category_normalized", "use_category_label", "source_metric_id"])
+    top_factbook_only_categories = _top_row_groups(factbook_only_rows, ["category_type", "use_category_normalized", "use_category_label", "source_metric_id"])
     top_missing_yuho_fields = _top_row_groups(missing_value_rows, ["yuho_field_id", "yuho_field_name", "category_type", "source_metric_id"])
     sample_columns = [
         "company_name",
@@ -650,6 +674,7 @@ def factbook_validation_summary(root: Path, sample_limit: int = 12) -> Dict[str,
         "by_source_metric_id": by_source_metric_id,
         "by_status_category": by_status_category,
         "top_no_mapping_categories": top_no_mapping_categories,
+        "top_factbook_only_categories": top_factbook_only_categories,
         "top_missing_yuho_fields": top_missing_yuho_fields,
         "pending_samples": samples,
     }
@@ -1616,6 +1641,7 @@ def _validate_factbook_row(
     tolerance_pct: float,
     *,
     aggregate_checks: Optional[Dict[Tuple[str, str, str, str], Dict[str, Any]]] = None,
+    result_fiscal_years: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     company_id = str(row.get("company_id") or "")
     fiscal_year = str(row.get("fiscal_year") or "")
@@ -1630,6 +1656,7 @@ def _validate_factbook_row(
         "period_label": row.get("period_label", ""),
         "source_metric_id": row.get("source_metric_id", ""),
         "category_type": row.get("category_type", ""),
+        "scope": row.get("scope", ""),
         "use_category_raw": row.get("use_category_raw", ""),
         "use_category_normalized": row.get("use_category_normalized", ""),
         "use_category_label": row.get("use_category_label", ""),
@@ -1661,15 +1688,23 @@ def _validate_factbook_row(
             "validation_message": aggregate_check.get("validation_message", ""),
         }
     if not field_id:
-        return {**base, "validation_status": "no_mapping", "validation_message": "有報側の同一粒度項目が未定義です。"}
+        if _is_factbook_only_row(row):
+            return {
+                **base,
+                "validation_status": "factbook_only",
+                "validation_message": "有報に同じ粒度の項目がないため、Factbook専用データとして保持します。",
+            }
+        return {**base, "validation_status": "no_mapping", "validation_message": "結果表の対応項目が未設定です。"}
     if factbook_value is None:
         return {**base, "validation_status": "missing_factbook_value", "validation_message": "ファクトブック値が数値化できません。"}
     wide = wide_by_company_year.get(f"{company_id}_{fiscal_year}")
     if not wide:
-        return {**base, "validation_status": "missing_yuho_row", "validation_message": "有報側の会社年度行がありません。"}
+        if result_fiscal_years and fiscal_year not in result_fiscal_years:
+            return {**base, "validation_status": "outside_result_period", "validation_message": "現在の結果表の対象年度外です。"}
+        return {**base, "validation_status": "missing_yuho_row", "validation_message": "結果表に対象会社・年度の行がありません。"}
     yuho_value = _safe_float(wide.get(field_id))
     if yuho_value is None:
-        return {**base, "validation_status": "missing_yuho_value", "validation_message": "有報側の照合項目が空欄です。"}
+        return {**base, "validation_status": "missing_yuho_value", "validation_message": "結果表の対象項目が空欄です。"}
     diff = factbook_value - yuho_value
     diff_pct = abs(diff) / max(abs(yuho_value), 1.0)
     passed = abs(diff) <= tolerance_abs or diff_pct <= tolerance_pct
@@ -1679,7 +1714,7 @@ def _validate_factbook_row(
         "diff_million_yen": _clean_number(diff),
         "diff_pct": round(diff_pct, 6),
         "validation_status": "pass" if passed else "mismatch",
-        "validation_message": "許容差内です。" if passed else "ファクトブック値と有報値が許容差を超えています。",
+        "validation_message": "許容差内です。" if passed else "Factbook値と結果表の値が許容差を超えています。",
     }
 
 
@@ -1697,6 +1732,8 @@ def _build_use_aggregate_checks(
     wide_by_company_year: Dict[str, Dict[str, Any]],
     tolerance_abs: float,
     tolerance_pct: float,
+    *,
+    result_fiscal_years: set[str],
 ) -> Dict[Tuple[str, str, str, str], Dict[str, Any]]:
     grouped: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
     for row in rows:
@@ -1719,21 +1756,27 @@ def _build_use_aggregate_checks(
         if any(value is None for value in values):
             continue
         wide = wide_by_company_year.get(f"{company_id}_{fiscal_year}")
-        if not wide:
-            continue
-        field_id = next(
-            (
-                candidate
-                for candidate in ("building_orders_total", "domestic_building_orders_total")
-                if _safe_float(wide.get(candidate)) is not None
-            ),
-            "",
-        )
-        if not field_id:
-            continue
+        field_id = "building_orders_total"
         factbook_total = sum(value for value in values if value is not None)
+        if not wide:
+            status = "outside_result_period" if fiscal_year not in result_fiscal_years else "missing_yuho_row"
+            checks[key] = {
+                "validation_basis": "use_category_sum",
+                "factbook_group_total_million_yen": _clean_number(factbook_total),
+                "yuho_field_id": field_id,
+                "validation_status": status,
+                "validation_message": "現在の結果表の対象年度外です。" if status == "outside_result_period" else "結果表に対象会社・年度の行がありません。",
+            }
+            continue
         yuho_value = _safe_float(wide.get(field_id))
         if yuho_value is None:
+            checks[key] = {
+                "validation_basis": "use_category_sum",
+                "factbook_group_total_million_yen": _clean_number(factbook_total),
+                "yuho_field_id": field_id,
+                "validation_status": "missing_yuho_value",
+                "validation_message": "用途別合計と比較する結果表の建築受注高が空欄です。",
+            }
             continue
         diff = factbook_total - yuho_value
         diff_pct = abs(diff) / max(abs(yuho_value), 1.0)
@@ -1747,20 +1790,31 @@ def _build_use_aggregate_checks(
             "diff_pct": round(diff_pct, 6),
             "validation_status": "pass" if passed else "mismatch",
             "validation_message": (
-                f"用途別{len(group_rows)}項目の合計が有報の建築受注高と許容差内です。"
+                f"用途別{len(group_rows)}項目の合計が結果表の建築受注高と許容差内です。"
                 if passed
-                else f"用途別{len(group_rows)}項目の合計と有報の建築受注高が許容差を超えています。"
+                else f"用途別{len(group_rows)}項目の合計と結果表の建築受注高が許容差を超えています。"
             ),
         }
     return checks
 
 
+def _is_factbook_only_row(row: Dict[str, Any]) -> bool:
+    category_type = str(row.get("category_type") or "")
+    scope = str(row.get("scope") or "")
+    if category_type == "use":
+        return True
+    return category_type == "business_scope" and scope in {"standalone", "mixed"}
+
+
 def _yuho_field_for_factbook_row(row: Dict[str, Any], cfg: Dict[str, Any]) -> str:
     configured = cfg.get("yuho_field_mappings") or {}
+    scope = str(row.get("scope") or "")
     category_type = str(row.get("category_type") or "")
     normalized = str(row.get("use_category_normalized") or "")
     raw = str(row.get("use_category_raw") or "")
     for key in (
+        f"{scope}:{category_type}:{normalized}",
+        f"{scope}:{category_type}:{raw}",
         f"{category_type}:{normalized}",
         f"{category_type}:{raw}",
         normalized,
@@ -1768,7 +1822,7 @@ def _yuho_field_for_factbook_row(row: Dict[str, Any], cfg: Dict[str, Any]) -> st
     ):
         if key and configured.get(key):
             return str(configured[key])
-    return DEFAULT_FACTBOOK_YUHO_FIELD_MAP.get((category_type, normalized), "")
+    return DEFAULT_FACTBOOK_YUHO_FIELD_MAP.get((scope, category_type, normalized), "")
 
 
 def _canonical_path(root: Path, cfg: Dict[str, Any]) -> Path:

@@ -522,6 +522,72 @@ class WebServiceTests(unittest.TestCase):
             self.assertEqual(resolved[0]["source_quote"], "second audit candidate")
             self.assertIn("selected_candidate=audit:1", resolved[0]["reviewer_note"])
 
+    def test_factbook_missing_value_is_exposed_and_saved_as_cell_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_table(
+                root / "config" / "company_master.csv",
+                [{"operating_company_id": "ANDO_HAZAMA", "operating_company_name": "安藤・間"}],
+            )
+            write_table(
+                root / "config" / "field_definition.csv",
+                [{"field_id": "building_orders_private", "field_name_ja": "建築受注高_民間", "target_unit": "百万円"}],
+            )
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [
+                    {
+                        "company_year_id": "ANDO_HAZAMA_2024",
+                        "operating_company_id": "ANDO_HAZAMA",
+                        "fiscal_year": "2024",
+                        "building_orders_private": "",
+                    }
+                ],
+            )
+            write_table(
+                root / "data" / "reports" / "company_factbook_yuho_validation.csv",
+                [
+                    {
+                        "company_id": "ANDO_HAZAMA",
+                        "fiscal_year": "2024",
+                        "validation_status": "missing_yuho_value",
+                        "yuho_field_id": "building_orders_private",
+                        "factbook_amount_million_yen": "123456",
+                        "source_dataset_id": "ando_hazama_factbook",
+                        "source_file": "factbook_2024.pdf",
+                        "source_url": "https://example.com/factbook_2024.pdf",
+                        "source_quote": "民間建築 123,456百万円",
+                        "scope": "standalone",
+                    }
+                ],
+            )
+
+            wide = read_wide(root, fields=["building_orders_private"], cell_status="factbook_candidate")
+            detail = read_cell_detail(root, "ANDO_HAZAMA_2024", "building_orders_private")
+
+            self.assertEqual(wide["total"], 1)
+            self.assertEqual(wide["cell_statuses"]["ANDO_HAZAMA_2024"]["building_orders_private"]["status"], "factbook_candidate")
+            self.assertEqual(detail["status"], "factbook_candidate")
+            self.assertEqual(detail["review_state"]["candidate_count"], 1)
+            self.assertEqual(detail["candidates"][0]["candidate_id"], "factbook:0")
+            self.assertEqual(detail["candidates"][0]["value"], "123456")
+
+            result = cells.save_cell_review(
+                root,
+                "ANDO_HAZAMA_2024",
+                "building_orders_private",
+                review_decision="accept",
+                candidate_id="factbook:0",
+            )
+
+            self.assertEqual(result["changed"], 1)
+            resolved = read_table(root / "data" / "review" / "review_resolved.csv")[0]
+            self.assertEqual(resolved["extracted_value"], "123456")
+            self.assertEqual(resolved["source_dataset_id"], "ando_hazama_factbook")
+            self.assertEqual(resolved["source_url"], "https://example.com/factbook_2024.pdf")
+            self.assertEqual(resolved["extraction_method"], "FACTBOOK_PDF")
+            self.assertIn("selected_candidate=factbook:0", resolved["reviewer_note"])
+
     def test_apply_similar_reviews_previews_before_writing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

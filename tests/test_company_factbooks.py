@@ -9,6 +9,57 @@ from yuho_auto_extract.services import company_factbooks, factbook_ai, factbook_
 
 
 class CompanyFactbookTests(unittest.TestCase):
+    def test_ando_hazama_factbook_parser_extracts_private_and_use_orders(self):
+        source = {
+            "company_id": "ANDO_HAZAMA",
+            "company_name": "安藤・間",
+            "source_doc_type": "factbook",
+            "source_dataset_id": "ando_hazama_factbook",
+            "scope": "standalone",
+            "url": "https://example.com/factbook2024.pdf",
+        }
+        texts = [
+            """
+①官公庁・民間・海外別受注高 （単位：百万円、％）
+2020年3月期 2021年3月期 2022年3月期 2023年3月期 2024年3月期
+官公庁 8,713 ［5.1］ 42,475 ［21.7］ 29,467 ［16.9］ 69,842 ［31.5］ 20,250 ［9.9］
+民間 163,580 ［94.9］ 153,272 ［78.3］ 145,009 ［83.1］ 151,677 ［68.5］ 184,735 ［90.1］
+国内建築
+土木 17,847 ［55.3］ 579 ［13.9］ 160 ［1.2］ 3,952 ［14.4］ 3,672 ［10.7］
+建築 14,412 ［44.7］ 3,593 ［86.1］ 12,773 ［98.8］ 23,426 ［85.6］ 30,593 ［89.3］
+海外工事
+土木 193,575 ［50.9］ 101,527 ［33.7］ 122,593 ［39.6］ 103,274 ［29.7］ 115,624 ［32.9］
+建築 186,706 ［49.1］ 199,341 ［66.3］ 187,250 ［60.4］ 244,946 ［70.3］ 235,579 ［67.1］
+合 計
+""",
+            """
+③種類別受注高（建築工事） （単位：百万円、％）
+2020年3月期 2021年3月期 2022年3月期 2023年3月期 2024年3月期
+事務所・庁舎 19,413 ［10.4］ 18,626 ［9.3］ 25,868 ［13.8］ 53,277 ［21.8］ 27,250 ［11.6］
+工場・発電所 48,202 ［25.8］ 33,799 ［17.0］ 66,459 ［35.5］ 70,130 ［28.6］ 99,546 ［42.3］
+""",
+        ]
+
+        rows = factbook_parsers._parse_ando_hazama_factbook_texts(texts, source, Path("factbook2024.pdf"), "now")
+
+        latest_scope = {
+            row["use_category_normalized"]: row
+            for row in rows
+            if row["fiscal_year"] == "2023" and row["category_type"] == "business_scope"
+        }
+        latest_use = {
+            row["use_category_normalized"]: row
+            for row in rows
+            if row["fiscal_year"] == "2023" and row["category_type"] == "use"
+        }
+        self.assertEqual(latest_scope["private_building"]["amount_million_yen"], 184735.0)
+        self.assertEqual(latest_scope["government_building"]["amount_million_yen"], 20250.0)
+        self.assertEqual(latest_scope["domestic_building"]["amount_million_yen"], 204985.0)
+        self.assertEqual(latest_scope["overseas_building"]["amount_million_yen"], 30593.0)
+        self.assertEqual(latest_scope["building"]["amount_million_yen"], 235579.0)
+        self.assertEqual(latest_use["office"]["amount_million_yen"], 27250.0)
+        self.assertEqual(latest_use["factory"]["source_metric_id"], "building_orders_by_use")
+
     def test_kajima_factbook_text_parser_extracts_ten_year_building_use_orders(self):
         source = {
             "company_id": "KAJIMA",
@@ -326,6 +377,7 @@ class CompanyFactbookTests(unittest.TestCase):
                         "source_dataset_id": "test_orders",
                         "source_metric_id": "building_orders_by_business_scope",
                         "category_type": "business_scope",
+                        "scope": "segment",
                         "use_category_raw": "国内建築",
                         "use_category_normalized": "domestic_building",
                         "use_category_label": "国内建築",
@@ -345,6 +397,7 @@ class CompanyFactbookTests(unittest.TestCase):
                         "source_dataset_id": "test_orders",
                         "source_metric_id": "building_orders_by_business_scope",
                         "category_type": "business_scope",
+                        "scope": "segment",
                         "use_category_raw": "開発事業等",
                         "use_category_normalized": "development_other",
                         "use_category_label": "開発事業等",
@@ -396,6 +449,42 @@ class CompanyFactbookTests(unittest.TestCase):
             self.assertEqual(summary["top_no_mapping_categories"][0]["use_category_normalized"], "development_other")
             self.assertEqual(summary["pending_samples"][0]["validation_status"], "no_mapping")
 
+    def test_factbook_only_rows_are_not_counted_as_unfinished_or_pending(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(root, parser="none")
+            write_table(
+                root / "data" / "marts" / "company_factbooks" / "building_orders_by_category.csv",
+                [
+                    {
+                        "company_id": "TEST",
+                        "company_name": "テスト建設",
+                        "fiscal_year": "2024",
+                        "period_type": "annual",
+                        "source_dataset_id": "test_orders",
+                        "source_metric_id": "company_specific_scope",
+                        "category_type": "business_scope",
+                        "scope": "standalone",
+                        "use_category_normalized": "company_specific",
+                        "use_category_label": "会社固有区分",
+                        "amount_million_yen": "5000",
+                        "extraction_status": "parsed",
+                    }
+                ],
+            )
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "TEST_2024", "operating_company_id": "TEST", "fiscal_year": "2024"}],
+            )
+
+            result = company_factbooks.validate_factbook_against_yuho(root)
+
+            self.assertEqual(result["status_counts"]["factbook_only"], 1)
+            self.assertEqual(result["incomplete_rows"], 0)
+            self.assertEqual(result["pending_rows"], 0)
+            summary = company_factbooks.factbook_validation_summary(root)
+            self.assertEqual(summary["top_factbook_only_categories"][0]["use_category_normalized"], "company_specific")
+
     def test_validate_factbook_respects_zero_tolerance_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -417,6 +506,7 @@ class CompanyFactbookTests(unittest.TestCase):
                         "period_type": "annual",
                         "source_metric_id": "building_orders_by_business_scope",
                         "category_type": "business_scope",
+                        "scope": "segment",
                         "use_category_normalized": "domestic_building",
                         "use_category_label": "国内建築",
                         "amount_million_yen": "120000",

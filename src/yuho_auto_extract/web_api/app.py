@@ -121,6 +121,7 @@ class SourceInferenceApplyRequest(BaseModel):
 class FactbookRefreshRequest(BaseModel):
     force: bool = False
     dry_run: bool = False
+    companies: List[str] = []
 
 
 class PromptRequest(BaseModel):
@@ -291,6 +292,7 @@ def start_factbook_refresh(request: FactbookRefreshRequest = Body(default=Factbo
             log=log,
             force=request.force,
             dry_run=request.dry_run,
+            company_ids=request.companies,
         ),
     )
 

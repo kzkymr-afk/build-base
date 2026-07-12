@@ -90,11 +90,13 @@ def _synthetic_reviewed_row(review: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "segment_taxonomy_status": review.get("segment_taxonomy_status", ""),
         "applies_to_company_id": review.get("applies_to_company_id", ""),
         "field_creation_reason": review.get("field_creation_reason", ""),
+        "source_dataset_id": review.get("source_dataset_id", ""),
         "source_doc_id": review.get("source_doc_id", ""),
         "source_file": review.get("source_file", "review_resolved.csv") or "review_resolved.csv",
+        "source_url": review.get("source_url", ""),
         "source_heading": review.get("source_heading", ""),
         "source_quote": review.get("source_quote", ""),
-        "extraction_method": "MANUAL",
+        "extraction_method": (review.get("extraction_method", "") or "MANUAL") if decision == "accept" else "MANUAL",
         "confidence": review.get("confidence", ""),
         "validation_status": review.get("validation_status", "pass") or "pass",
         "review_status": review_status,
@@ -124,8 +126,10 @@ def _copy_review_audit_fields(row: Dict[str, Any], review: Dict[str, Any]) -> No
         "segment_taxonomy_status",
         "applies_to_company_id",
         "field_creation_reason",
+        "source_dataset_id",
         "source_doc_id",
         "source_file",
+        "source_url",
         "source_heading",
         "source_quote",
         "confidence",
@@ -134,6 +138,10 @@ def _copy_review_audit_fields(row: Dict[str, Any], review: Dict[str, Any]) -> No
         value = review.get(field)
         if not is_blankish(value):
             row[field] = value
+    if str(review.get("review_decision", "")).lower() == "accept":
+        extraction_method = review.get("extraction_method")
+        if not is_blankish(extraction_method):
+            row["extraction_method"] = extraction_method
 
 
 def filter_exportable_rows(rows: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -231,8 +239,10 @@ def build_source_audit(
         "segment_taxonomy_status",
         "applies_to_company_id",
         "field_creation_reason",
+        "source_dataset_id",
         "source_doc_id",
         "source_file",
+        "source_url",
         "source_heading",
         "source_quote",
         "extraction_method",

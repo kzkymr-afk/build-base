@@ -332,9 +332,9 @@ const factbookValidationColumnLabels: Record<string, string> = {
   company_name: '会社名',
   fiscal_year: '年度',
   factbook_amount_million_yen: 'FB値(百万円)',
-  yuho_field_id: '有報項目ID',
-  yuho_field_name: '有報項目',
-  yuho_value_million_yen: '有報値(百万円)',
+  yuho_field_id: '結果表項目ID',
+  yuho_field_name: '結果表項目',
+  yuho_value_million_yen: '結果表値(百万円)',
   source_quote: '引用',
   count: '件数'
 };
@@ -419,19 +419,19 @@ function factbookNextActions(validation: FactbookValidationSummary | null): stri
   const counts = validation?.by_status || {};
   const actions: string[] = [];
   if ((counts.no_mapping || 0) > 0) {
-    actions.push(`対応項目なし ${counts.no_mapping}件: 「未対応付け上位」を見て、有報側に同じ粒度の項目を追加するか、対象外として扱うかを決めます。`);
+    actions.push(`設定不足 ${counts.no_mapping}件: 対応付けルールを確認します。`);
   }
   if ((counts.missing_yuho_value || 0) > 0) {
-    actions.push(`有報側の値が空欄 ${counts.missing_yuho_value}件: 結果表で該当セルを開き、候補採用または手入力で補完します。`);
+    actions.push(`結果表が空欄 ${counts.missing_yuho_value}件: 該当セルを開き、Factbook候補を確認して採用します。`);
   }
   if ((counts.missing_yuho_row || 0) > 0) {
-    actions.push(`有報側の会社年度行なし ${counts.missing_yuho_row}件: 対象会社・年度の有報取得/解決状態を確認します。`);
+    actions.push(`結果表の会社年度行なし ${counts.missing_yuho_row}件: 対象期間内の年度だけ取得・解決状態を確認します。`);
   }
   if ((counts.missing_factbook_value || 0) > 0) {
     actions.push(`ファクトブック値が数値化不可 ${counts.missing_factbook_value}件: 元表の単位・行見出し・PDF/Excelパーサを確認します。`);
   }
   if (!actions.length && (validation?.pending_rows || 0) > 0) {
-    actions.push('未完了行があります。pendingサンプルの理由を見て、対応項目・有報側の値・元表パーサのどこで止まっているか確認します。');
+    actions.push('未完了行があります。未確認サンプルを見て、結果表の対応項目・空欄・元表パーサのどこで止まっているか確認します。');
   }
   return actions.slice(0, 3);
 }
@@ -534,6 +534,7 @@ const resultCellStatusOptions = [
   { value: 'corroboration_needs_review', label: '照合後に要確認' },
   { value: 'review_saved_not_applied', label: '保存済み未反映' },
   { value: 'blank_with_review_candidate', label: 'レビュー候補あり' },
+  { value: 'factbook_candidate', label: 'Factbook候補あり' },
   { value: 'blank_no_candidate', label: '候補なし' },
 ];
 
@@ -662,7 +663,15 @@ function App() {
         {tab === 'fields' && <FieldAdminPanel onUpdated={() => setDataRefreshToken((value) => value + 1)} />}
         {tab === 'concepts' && <ConceptManagementPanel onError={setError} refreshToken={dataRefreshToken} />}
         {tab === 'stocks' && <StocksPanel refreshToken={dataRefreshToken} />}
-        {tab === 'factbooks' && <FactbooksPanel refreshToken={dataRefreshToken} job={job} onJob={setJob} onError={setError} />}
+        {tab === 'factbooks' && (
+          <FactbooksPanel
+            refreshToken={dataRefreshToken}
+            job={job}
+            onJob={setJob}
+            onError={setError}
+            onNavigateToResults={(target) => { setResultsFilterTarget(target); setTab('results'); }}
+          />
+        )}
         {tab === 'charts' && <ChartsPanel refreshToken={dataRefreshToken} />}
         {tab === 'audit' && <AuditPanel initialTarget={auditTarget} refreshToken={dataRefreshToken} />}
         {tab === 'review' && <ReviewPanel initialTarget={reviewTarget} job={job} onJob={setJob} onError={setError} refreshToken={dataRefreshToken} />}
@@ -2630,12 +2639,14 @@ function FactbooksPanel({
   refreshToken,
   job,
   onJob,
-  onError
+  onError,
+  onNavigateToResults
 }: {
   refreshToken: number;
   job: Job | null;
   onJob: (job: Job) => void;
   onError: (message: string) => void;
+  onNavigateToResults: (target: ResultsFilterTarget) => void;
 }) {
   const [page, setPage] = React.useState(1);
   const [documentPage, setDocumentPage] = React.useState(1);
@@ -2710,7 +2721,7 @@ function FactbooksPanel({
     try {
       const next = await api<Job>('/api/jobs/factbook-refresh', {
         method: 'POST',
-        body: JSON.stringify({ force: true, dry_run: dryRun }),
+        body: JSON.stringify({ force: true, dry_run: dryRun, companies: company ? [company] : [] }),
       });
       onJob(next);
       window.setTimeout(() => {
@@ -2731,6 +2742,7 @@ function FactbooksPanel({
   const validationBadgeLabel = validationHasNoComparableRows ? '照合不可' : formatTermText(validation?.status || '未検証');
   const comparableRate = validation?.rows ? `${(((validation.comparable_rows || 0) / validation.rows) * 100).toFixed(1)}%` : '-';
   const nextActions = factbookNextActions(validation);
+  const selectedCompanyLabel = (options?.companies || []).find((item) => item.id === company)?.name || company;
 
   return (
     <section className="stack">
@@ -2768,11 +2780,11 @@ function FactbooksPanel({
         </div>
         {factbookHasNoComparableRows && (
           <div className="alert">
-            ファクトブック抽出行はありますが、有報値と比較可能な行が0件です。用途別受注などの対応付け・有報側の値補完が終わるまで、自動採用済みデータとして扱わないでください。
+            ファクトブック抽出行はありますが、結果表と比較可能な行が0件です。用途別などのFactbook専用データと、結果表へ採用できる候補を区別して確認してください。
           </div>
         )}
         <div className="inline-actions">
-          <button onClick={() => startRefresh(false)} disabled={jobRunning}>公式ソースを取得</button>
+          <button onClick={() => startRefresh(false)} disabled={jobRunning}>{company ? `${selectedCompanyLabel}を取得` : '全社の公式ソースを取得'}</button>
           <button className="ghost" onClick={() => startRefresh(true)} disabled={jobRunning}>取得ドライラン</button>
           <button className="ghost" onClick={() => { loadStatus(); refreshOptions(); }} disabled={jobRunning}>ファクトブック再読込</button>
         </div>
@@ -2780,7 +2792,7 @@ function FactbooksPanel({
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>有報照合ステータス</h2>
+            <h2>結果表との照合</h2>
             <p className="muted">
               {validation?.validated_at_utc ? `最終検証: ${validation.validated_at_utc}` : '照合結果を読み込み中です。'}
             </p>
@@ -2806,21 +2818,26 @@ function FactbooksPanel({
             <ul className="compact-list">
               {nextActions.map((action) => <li key={action}>{action}</li>)}
             </ul>
+            {(validation?.by_status?.missing_yuho_value || 0) > 0 && (
+              <button className="ghost mini-action" onClick={() => onNavigateToResults({ cell_status: 'factbook_candidate' })}>
+                Factbook候補セルを見る
+              </button>
+            )}
           </div>
         )}
-        <p className="hint">「対応項目なし」は有報側に同じ粒度の項目が未定義、「有報側の値が空欄」は項目定義はあるが完成表の値が未入力です。用途別受注を無理に総額へ寄せる対応付けは行いません。</p>
+        <p className="hint">「Factbook専用」は有報に同じ粒度がない正規データです。「設定不足」は結果表の対応項目が未設定です。「結果表が空欄」はセル作業からFactbook候補を採用できます。</p>
         <div className="grid two">
           <div>
-            <h3>未対応付け上位</h3>
+            <h3>Factbook専用データ上位</h3>
             <DataTable
-              data={validation?.top_no_mapping_categories || []}
+              data={validation?.top_factbook_only_categories || []}
               columns={['category_type', 'use_category_label', 'source_metric_id', 'count']}
               columnLabels={factbookValidationColumnLabels}
               clampAllCells
             />
           </div>
           <div>
-            <h3>有報値欠損上位</h3>
+            <h3>結果表の空欄候補上位</h3>
             <DataTable
               data={validation?.top_missing_yuho_fields || []}
               columns={['yuho_field_id', 'yuho_field_name', 'category_type', 'source_metric_id', 'count']}
@@ -2829,6 +2846,17 @@ function FactbooksPanel({
             />
           </div>
         </div>
+        {(validation?.top_no_mapping_categories?.length || 0) > 0 && (
+          <>
+            <h3>設定不足</h3>
+            <DataTable
+              data={validation?.top_no_mapping_categories || []}
+              columns={['category_type', 'use_category_label', 'source_metric_id', 'count']}
+              columnLabels={factbookValidationColumnLabels}
+              clampAllCells
+            />
+          </>
+        )}
         <h3>未確認サンプル</h3>
         <DataTable
           data={validation?.pending_samples || []}
@@ -2867,7 +2895,7 @@ function FactbooksPanel({
         </label>
         <input value={search} onChange={(e) => resetPage(() => setSearch(e.target.value))} placeholder="分類・資料名・URLを検索" />
       </FilterBar>
-      <p className="hint">用途別は「用途別」、清水の建築/土木等の区分は「建築/土木等」として分けて保存します。グラフでは有報照合に合格した「グラフ利用可」の行だけを使用します。</p>
+      <p className="hint">用途別は「用途別」、清水の建築/土木等の区分は「建築/土木等」として分けて保存します。グラフでは結果表との一致を確認できた「グラフ利用可」の行だけを使用します。</p>
       {optionsError && <InlineError message={optionsError} />}
       {error && <InlineError message={error} />}
       <div className="panel">

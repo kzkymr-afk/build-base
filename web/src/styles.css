@@ -1481,6 +1481,7 @@ tbody tr:hover {
 }
 
 .status-blank_with_review_candidate,
+.status-factbook_candidate,
 .status-review_saved_not_applied {
   background: var(--warning-soft);
   color: var(--warning);

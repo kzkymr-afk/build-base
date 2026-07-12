@@ -24,6 +24,8 @@ def parse_document(
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     ext = path.suffix.lower()
     if ext == ".pdf":
+        if _is_ando_hazama_factbook(source, path):
+            return _parse_ando_hazama_factbook_pdf(path, source, fetched_at)
         if _is_kajima_factbook(source, path):
             return _parse_kajima_factbook_pdf(path, source, fetched_at)
         if _is_kajima_q_order(source):
@@ -85,6 +87,14 @@ def _is_kajima_factbook(source: Dict[str, Any], path: Path) -> bool:
     )
 
 
+def _is_ando_hazama_factbook(source: Dict[str, Any], path: Path) -> bool:
+    return (
+        str(source.get("company_id") or "") == "ANDO_HAZAMA"
+        and str(source.get("source_doc_type") or "") == "factbook"
+        and path.name.lower().startswith("factbook")
+    )
+
+
 def _is_obayashi_results_reference(source: Dict[str, Any]) -> bool:
     return (
         str(source.get("company_id") or "") == "OBAYASHI"
@@ -131,6 +141,186 @@ def _parse_kajima_factbook_pdf(path: Path, source: Dict[str, Any], fetched_at: s
     if not rows:
         warnings.append(f"no Kajima building order use rows parsed from {path.name}")
     return rows, warnings
+
+
+def _parse_ando_hazama_factbook_pdf(path: Path, source: Dict[str, Any], fetched_at: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError:
+        return [], ["pdfplumber is required to parse Ando Hazama factbook PDFs"]
+    _suppress_pdfminer_warnings()
+    with pdfplumber.open(path) as pdf:
+        texts = [page.extract_text(x_tolerance=2, y_tolerance=2) or "" for page in pdf.pages]
+    rows = _parse_ando_hazama_factbook_texts(texts, source, path, fetched_at)
+    warnings: List[str] = []
+    if not rows:
+        warnings.append(f"no Ando Hazama building order rows parsed from {path.name}")
+    return rows, warnings
+
+
+def _parse_ando_hazama_factbook_texts(
+    texts: Sequence[str],
+    source: Dict[str, Any],
+    path: Path,
+    fetched_at: str,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for text in texts:
+        compact_text = re.sub(r"[ \u3000]", "", text)
+        if "官公庁・民間・海外別受注高" in compact_text:
+            rows.extend(_ando_hazama_scope_rows(text, source, path, fetched_at))
+        if "種類別受注高（建築工事）" in compact_text:
+            rows.extend(_ando_hazama_use_rows(text, source, path, fetched_at))
+    return rows
+
+
+def _ando_hazama_scope_rows(text: str, source: Dict[str, Any], path: Path, fetched_at: str) -> List[Dict[str, Any]]:
+    years = _ando_hazama_fiscal_years(text)
+    if not years:
+        return []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    domestic_index = next((index for index, line in enumerate(lines) if re.sub(r"\s+", "", line) == "国内建築"), -1)
+    overseas_index = next((index for index, line in enumerate(lines) if re.sub(r"\s+", "", line) == "海外工事"), -1)
+    total_index = next((index for index, line in enumerate(lines) if re.sub(r"\s+", "", line) == "合計"), -1)
+    if min(domestic_index, overseas_index, total_index) < 0:
+        return []
+
+    government = _ando_hazama_previous_amounts(lines, domestic_index, "官公庁", len(years))
+    private = _ando_hazama_previous_amounts(lines, domestic_index, "民間", len(years))
+    overseas = _ando_hazama_previous_amounts(lines, overseas_index, "建築", len(years))
+    building = _ando_hazama_previous_amounts(lines, total_index, "建築", len(years))
+    if not all((government, private, overseas, building)):
+        return []
+
+    categories = [
+        ("国内建築 官公庁", "government_building", government),
+        ("国内建築 民間", "private_building", private),
+        ("国内建築 計", "domestic_building", [a + b for a, b in zip(government, private)]),
+        ("海外工事 建築", "overseas_building", overseas),
+        ("建築 合計", "building", building),
+    ]
+    return [
+        _ando_hazama_row(
+            source,
+            path,
+            fetched_at,
+            fiscal_year,
+            raw_category,
+            normalized_category,
+            amount,
+            "building_orders_by_business_scope",
+            "business_scope",
+            "官公庁・民間・海外別受注高",
+        )
+        for raw_category, normalized_category, amounts in categories
+        for fiscal_year, amount in zip(years, amounts)
+    ]
+
+
+def _ando_hazama_use_rows(text: str, source: Dict[str, Any], path: Path, fetched_at: str) -> List[Dict[str, Any]]:
+    years = _ando_hazama_fiscal_years(text)
+    if not years:
+        return []
+    categories = [
+        ("事務所・庁舎", "office"),
+        ("宿泊施設", "lodging"),
+        ("店舗", "commercial"),
+        ("工場・発電所", "factory"),
+        ("倉庫・流通施設", "logistics"),
+        ("住宅", "housing"),
+        ("教育・研究・文化施設", "education_research"),
+        ("医療・福祉施設", "medical_welfare"),
+        ("娯楽施設", "other_use"),
+        ("その他建築", "other_use"),
+    ]
+    rows: List[Dict[str, Any]] = []
+    for line in text.splitlines():
+        normalized_line = re.sub(r"\s+", "", line)
+        category = next(((raw, normalized) for raw, normalized in categories if normalized_line.startswith(raw)), None)
+        if category is None:
+            continue
+        amounts = _ando_hazama_bracketed_amounts(line)
+        if len(amounts) != len(years):
+            continue
+        raw_category, normalized_category = category
+        rows.extend(
+            _ando_hazama_row(
+                source,
+                path,
+                fetched_at,
+                fiscal_year,
+                raw_category,
+                normalized_category,
+                amount,
+                "building_orders_by_use",
+                "use",
+                "種類別受注高（建築工事）",
+            )
+            for fiscal_year, amount in zip(years, amounts)
+        )
+    return rows
+
+
+def _ando_hazama_fiscal_years(text: str) -> List[int]:
+    for line in text.splitlines():
+        closing_years = [int(year) for year in re.findall(r"(20\d{2})年3月期", line)]
+        if len(closing_years) >= 3:
+            return [year - 1 for year in closing_years]
+    return []
+
+
+def _ando_hazama_previous_amounts(lines: Sequence[str], marker_index: int, label: str, count: int) -> List[float]:
+    for line in reversed(lines[:marker_index]):
+        if re.sub(r"\s+", "", line).startswith(label):
+            amounts = _ando_hazama_bracketed_amounts(line)
+            if len(amounts) == count:
+                return amounts
+    return []
+
+
+def _ando_hazama_bracketed_amounts(line: str) -> List[float]:
+    return [float(token.replace(",", "")) for token in re.findall(r"([\d,]+)\s*[［\[]", line)]
+
+
+def _ando_hazama_row(
+    source: Dict[str, Any],
+    path: Path,
+    fetched_at: str,
+    fiscal_year: int,
+    raw_category: str,
+    normalized_category: str,
+    amount: float,
+    metric_id: str,
+    category_type: str,
+    table_title: str,
+) -> Dict[str, Any]:
+    return {
+        "company_id": source.get("company_id", ""),
+        "company_name": source.get("company_name", ""),
+        "fiscal_year": str(fiscal_year),
+        "fiscal_year_end": f"{fiscal_year + 1}-03-31",
+        "period_type": "annual",
+        "period_label": f"{fiscal_year + 1}年3月期",
+        "source_company_id": source.get("company_id", ""),
+        "source_doc_type": source.get("source_doc_type", ""),
+        "source_dataset_id": source.get("source_dataset_id", source.get("id", "")),
+        "source_metric_id": metric_id,
+        "category_type": category_type,
+        "scope": source.get("scope") or "standalone",
+        "business_scope": source.get("business_scope") or "building_orders",
+        "use_category_raw": raw_category,
+        "use_category_normalized": normalized_category,
+        "order_amount": amount,
+        "unit": "百万円",
+        "amount_million_yen": amount,
+        "source_url": source.get("url") or source.get("source_url") or source.get("source_page_url", ""),
+        "source_page": source.get("source_page_url", ""),
+        "source_table_title": table_title,
+        "source_quote": f"{raw_category} {fiscal_year + 1}年3月期 {amount:g}百万円",
+        "source_file": str(path),
+        "extraction_status": "parsed",
+        "fetched_at_utc": fetched_at,
+    }
 
 
 def _parse_kajima_factbook_texts(

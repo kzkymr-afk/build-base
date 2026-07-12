@@ -55,9 +55,13 @@ def save_cell_review(
         for row in read_table(root / "data" / "final" / "source_audit.csv")
         if str(row.get("company_year_id", "")) == key[0] and str(row.get("field_id", "")) == key[1]
     ]
+    from yuho_auto_extract.services import datasets
+
+    factbook_rows = datasets._read_factbook_cell_candidates(root).get(key, [])
     candidate_kind, candidate_index = _parse_candidate_id(candidate_id)
     selected_queue_row = _candidate_row(queue_rows, candidate_kind, candidate_index, "review")
     selected_audit_row = _candidate_row(audit_rows, candidate_kind, candidate_index, "audit")
+    selected_factbook_row = _candidate_row(factbook_rows, candidate_kind, candidate_index, "factbook")
 
     if selected_queue_row is not None:
         if review_decision == "accept" and str(selected_queue_row.get("extracted_value", "")).strip() == "":
@@ -67,6 +71,20 @@ def save_cell_review(
         resolved_value = corrected_value if review_decision == "correct" else selected_queue_row.get("extracted_value", "")
         unit = selected_queue_row.get("unit_normalized", "") or ""
         _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, unit)
+        return result
+
+    if selected_factbook_row is not None:
+        if review_decision == "accept" and str(selected_factbook_row.get("extracted_value", "")).strip() == "":
+            raise ValueError("extracted_value is required when review_decision is accept")
+        resolved = _resolved_row_from_base(
+            selected_factbook_row,
+            row,
+            _candidate_note(reviewer_note, candidate_id, "factbook"),
+        )
+        result = _upsert_resolved_rows(root, [resolved])
+        result["synthetic_review_rows"] = 1
+        resolved_value = corrected_value if review_decision == "correct" else selected_factbook_row.get("extracted_value", "")
+        _attach_inferred_source_suggestion(root, result, key[0], key[1], review_decision, resolved_value, "百万円")
         return result
 
     base = _synthetic_review_row(root, key[0], key[1], audit_row=selected_audit_row or {})
