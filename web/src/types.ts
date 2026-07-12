@@ -208,6 +208,7 @@ export type FactbookValidationSummary = {
   validated_at_utc?: string;
   rows?: number;
   comparable_rows?: number;
+  validated_rows?: number;
   incomplete_rows?: number;
   pending_rows?: number;
   status_counts?: Record<string, number>;
@@ -220,6 +221,7 @@ export type FactbookValidationSummary = {
   pending_samples?: Row[];
   output_path?: string;
   pending_output_path?: string;
+  validated_output_path?: string;
   output_exists?: boolean;
   pending_output_exists?: boolean;
 };

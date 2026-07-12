@@ -161,6 +161,17 @@ class ReconciliationTests(unittest.TestCase):
             self.assertEqual(len(result["targets"]), 2)
             self.assertFalse((root / "data" / "review" / "review_resolved.csv").exists())
 
+            applied = reconciliation.apply_reconciliation_group(
+                root,
+                "identity_group_mismatch:sum_building_orders",
+                decision="accept",
+                reviewer_note="group checked",
+                reviewer="tester",
+                preview=False,
+            )
+            self.assertEqual(applied["target_count"], result["target_count"])
+            self.assertEqual(applied["applied_items"], result["target_count"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,10 @@ export const TERM_JA: Record<string, string> = {
   failed: '失敗',
   succeeded: '成功',
   pending: '未完了',
+  incomplete: '照合未完了',
+  completed: '照合完了',
+  pass: '照合済み',
+  mismatch: '数値不一致',
   no_mapping: '対応項目なし',
   missing_yuho_value: '有報側の値が空欄',
   missing_yuho_row: '有報側の行なし',
@@ -86,6 +90,17 @@ export const TERM_JA: Record<string, string> = {
   restatement: '訂正の疑い',
   deterministic: '自動一致',
   unverifiable: '照合不能',
+  office: '事務所',
+  factory: '工場・生産施設',
+  housing: '住宅',
+  commercial: '商業施設・店舗',
+  medical_welfare: '医療・福祉',
+  education_research: '教育・研究',
+  lodging: '宿泊施設',
+  logistics: '倉庫・流通施設',
+  public_cultural: '公共・文化施設',
+  other_use: 'その他用途',
+  development_other: '開発事業等',
 };
 
 /** 用語辞書に基づく表示文字列変換。未登録キーはそのまま返す。 */

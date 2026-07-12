@@ -9,6 +9,42 @@ from yuho_auto_extract.services import company_factbooks, factbook_ai, factbook_
 
 
 class CompanyFactbookTests(unittest.TestCase):
+    def test_kajima_factbook_text_parser_extracts_ten_year_building_use_orders(self):
+        source = {
+            "company_id": "KAJIMA",
+            "company_name": "鹿島建設",
+            "source_doc_type": "factbook",
+            "source_dataset_id": "kajima_factbook_all",
+            "url": "https://example.com/factbook20260514-j.pdf",
+        }
+        text = """
+■ 受注高（単体） （単位：百万円）
+会計年度 2017.3 2018.3 2019.3 2020.3 2021.3 2022.3 2023.3 2024.3 2025.3 2026.3
+【工種別受注高（建設事業）】
+ 建築工事 940,273 845,356 1,074,060 794,967 867,291 882,275 1,102,857 1,358,535 1,334,668 1,555,678
+  事務所・庁舎 413,483 241,079 409,585 239,832 278,838 240,823 289,879 442,338 535,749 425,933
+  宿泊施設 50,463 72,204 58,296 46,197 66,960 52,186 49,398 90,797 43,562 173,028
+  店舗 21,600 39,091 15,881 39,701 46,572 29,714 12,869 46,245 13,704 5,221
+  工場・発電所 151,920 232,265 253,743 171,670 207,195 286,707 534,065 385,747 424,950 541,421
+  倉庫・流通施設 18,674 21,837 33,538 34,412 38,536 98,834 26,094 16,864 23,959 6,068
+  住宅 70,300 43,366 95,538 16,084 29,022 37,011 26,797 45,293 91,959 119,097
+  教育・研究・文化施設 100,285 76,748 113,168 143,879 59,372 45,567 37,894 128,647 113,206 83,507
+  医療・福祉施設 55,597 47,061 35,142 17,162 25,418 6,709 32,864 63,231 22,096 5,586
+  その他 57,946 71,701 59,164 86,025 115,374 84,720 92,993 139,367 65,479 195,813
+【国内民間業種別受注高（建設事業）】
+"""
+
+        rows = factbook_parsers._parse_kajima_factbook_texts(
+            [text], source, Path("factbook20260514-j.pdf"), "now"
+        )
+
+        self.assertEqual(len(rows), 90)
+        latest = {row["use_category_normalized"]: row for row in rows if row["fiscal_year"] == "2025"}
+        self.assertEqual(len(latest), 9)
+        self.assertEqual(latest["office"]["amount_million_yen"], 425933)
+        self.assertEqual(latest["factory"]["order_amount"], 541421)
+        self.assertEqual(latest["other_use"]["source_metric_id"], "building_orders_by_use")
+
     def test_kajima_q_order_text_parser_extracts_annual_business_scope_orders(self):
         source = {
             "company_id": "KAJIMA",
@@ -411,6 +447,56 @@ class CompanyFactbookTests(unittest.TestCase):
             self.assertEqual(result["status_counts"]["mismatch"], 1)
             rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.csv")
             self.assertEqual(rows[0]["validation_status"], "mismatch")
+
+    def test_validate_factbook_use_rows_against_yuho_building_total(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_config(root, parser="none")
+            write_table(
+                root / "data" / "marts" / "company_factbooks" / "building_orders_by_category.csv",
+                [
+                    {
+                        "company_id": "TEST",
+                        "company_name": "テスト建設",
+                        "fiscal_year": "2024",
+                        "period_type": "annual",
+                        "source_dataset_id": "test_factbook",
+                        "source_metric_id": "building_orders_by_use",
+                        "category_type": "use",
+                        "scope": "standalone",
+                        "use_category_normalized": category,
+                        "amount_million_yen": amount,
+                        "extraction_status": "parsed",
+                    }
+                    for category, amount in (("office", "600"), ("factory", "400"))
+                ],
+            )
+            write_table(
+                root / "data" / "final" / "final_master_wide.csv",
+                [{"company_year_id": "TEST_2024", "building_orders_total": "1000"}],
+            )
+            write_table(
+                root / "config" / "field_definition.csv",
+                [{"field_id": "building_orders_total", "field_name_ja": "建築受注高_合計"}],
+            )
+
+            result = company_factbooks.validate_factbook_against_yuho(root)
+
+            self.assertEqual(result["comparable_rows"], 2)
+            self.assertEqual(result["status_counts"]["pass"], 2)
+            self.assertEqual(result["pending_rows"], 0)
+            rows = read_table(root / "data" / "reports" / "company_factbook_yuho_validation.csv")
+            self.assertEqual({row["validation_basis"] for row in rows}, {"use_category_sum"})
+            self.assertEqual({row["factbook_group_total_million_yen"] for row in rows}, {"1000"})
+            self.assertEqual({row["yuho_field_id"] for row in rows}, {"building_orders_total"})
+            validated = read_table(root / "data" / "marts" / "company_factbooks" / "building_orders_validated.csv")
+            self.assertEqual(len(validated), 2)
+            chart = company_factbooks.read_factbook_chart_data(
+                root,
+                companies=["TEST"],
+                fields=["order_amount__use__office"],
+            )
+            self.assertEqual(chart["trust_filter"], "validated_only")
 
     def test_coverage_counts_business_scope_orders_as_building_order_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:

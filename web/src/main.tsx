@@ -2792,6 +2792,7 @@ function FactbooksPanel({
         <div className="automation-grid">
           <div className="metric"><small>検証行</small><strong>{validation?.rows ?? '-'}</strong></div>
           <div className="metric"><small>比較可能</small><strong>{validation?.comparable_rows ?? '-'}</strong></div>
+          <div className="metric"><small>グラフ利用可</small><strong className="text-ok">{validation?.validated_rows ?? '-'}</strong></div>
           <div className="metric"><small>比較可能率</small><strong className={validationHasNoComparableRows ? 'text-warn' : ''}>{comparableRate}</strong></div>
           <div className="metric"><small>未完了</small><strong className={validation?.incomplete_rows ? 'text-warn' : 'text-ok'}>{validation?.incomplete_rows ?? '-'}</strong></div>
           <div className="metric"><small>未確認行</small><strong>{validation?.pending_rows ?? '-'}</strong></div>
@@ -2813,7 +2814,7 @@ function FactbooksPanel({
             <h3>未対応付け上位</h3>
             <DataTable
               data={validation?.top_no_mapping_categories || []}
-              columns={['category_type', 'use_category_normalized', 'use_category_label', 'source_metric_id', 'count']}
+              columns={['category_type', 'use_category_label', 'source_metric_id', 'count']}
               columnLabels={factbookValidationColumnLabels}
               clampAllCells
             />
@@ -2866,7 +2867,7 @@ function FactbooksPanel({
         </label>
         <input value={search} onChange={(e) => resetPage(() => setSearch(e.target.value))} placeholder="分類・資料名・URLを検索" />
       </FilterBar>
-      <p className="hint">用途別は「用途別」、清水の建築/土木等の区分は「建築/土木等」として分けて保存します。グラフタブではデータ種別を「ファクトブック受注」に切り替えてください。</p>
+      <p className="hint">用途別は「用途別」、清水の建築/土木等の区分は「建築/土木等」として分けて保存します。グラフでは有報照合に合格した「グラフ利用可」の行だけを使用します。</p>
       {optionsError && <InlineError message={optionsError} />}
       {error && <InlineError message={error} />}
       <div className="panel">
@@ -5045,7 +5046,11 @@ function ReconciliationPanel({ onError, refreshToken }: { onError: (message: str
           preview: false,
         }),
       });
-      setMessage(`保存しました: ${result.applied_items}件 / resolved合計 ${result.total}件`);
+      if (result.target_count !== preview.target_count || result.applied_items !== preview.target_count) {
+        setMessage(`対象件数が事前確認から変化しました: 確認${preview.target_count}件 / 実行対象${result.target_count}件 / 保存${result.applied_items}件。再読み込みして確認してください。`);
+      } else {
+        setMessage(`事前確認どおり${result.applied_items}件を保存しました / resolved合計 ${result.total}件`);
+      }
       load();
     } catch (err) {
       onError(String(err));
@@ -5178,7 +5183,11 @@ function MappingReviewPanel({ onError, refreshToken }: { onError: (message: stri
         method: 'POST',
         body: JSON.stringify({ reviewer: 'web_ui', preview: false }),
       });
-      setMessage(`一括却下しました: ${r.rejected}件（候補${r.candidates}件）`);
+      if (r.candidates !== preview.candidates || r.rejected !== preview.candidates) {
+        setMessage(`対象件数が事前確認から変化しました: 確認${preview.candidates}件 / 実行対象${r.candidates}件 / 却下${r.rejected}件。再読み込みして確認してください。`);
+      } else {
+        setMessage(`事前確認どおり${r.rejected}件を一括却下しました。`);
+      }
       load();
     } catch (err) {
       onError(String(err));

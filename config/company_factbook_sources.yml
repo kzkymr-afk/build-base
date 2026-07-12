@@ -210,7 +210,11 @@ company_document_sources:
     source_page_url: https://www.kajima.co.jp/ir/fact/index-j.html
     source_dataset_id: kajima_factbook_all
     source_doc_type: factbook
-    parse_documents: false
+    scope: standalone
+    business_scope: building_orders
+    parse_documents: true
+    parse_file_name_includes:
+      - factbook
 
   - id: taisei_databook_documents
     company_id: TAISEI

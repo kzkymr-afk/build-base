@@ -62,7 +62,11 @@ web_urls() {
   if command -v tailscale >/dev/null 2>&1; then
     TS_IP="$(tailscale_cli ip -4 2>/dev/null || true)"
     if [ -n "$TS_IP" ]; then
-      echo "Tailscale IP:   http://$TS_IP:$PORT/"
+      echo "Tailscale共有IP: http://$TS_IP:$PORT/"
+    fi
+    SYSTEM_TS_IP="$(tailscale ip -4 2>/dev/null || true)"
+    if [ -n "$SYSTEM_TS_IP" ] && [ "$SYSTEM_TS_IP" != "$TS_IP" ]; then
+      echo "Tailscale端末IP: http://$SYSTEM_TS_IP:$PORT/"
     fi
     TS_SERVE_STATUS="$(tailscale_cli serve status 2>/dev/null || true)"
     TS_SERVE_HOST="$(printf '%s\n' "$TS_SERVE_STATUS" | awk -v port="$PORT" '$1 ~ "^http://.*[.]ts[.]net:" port "$" {print $1; exit}')"
@@ -72,7 +76,7 @@ web_urls() {
     elif [ -n "$TS_SERVE_SHORT" ]; then
       echo "Tailscale固定: $TS_SERVE_SHORT/"
     else
-      echo "Tailscale固定: http://business-dashboard.tail85c1ee.ts.net:$PORT/"
+      echo "Tailscale固定: 未設定"
     fi
   fi
 }

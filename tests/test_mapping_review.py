@@ -426,6 +426,11 @@ class ConfirmRejectMappingProposalTests(unittest.TestCase):
             self.assertEqual(row["status"], "proposed")
             self.assertEqual(row["decided_by"], "ai:model-x")
 
+            applied = mapping_review.bulk_reject_conflicting_proposals(root, reviewer="tester", preview=False)
+            self.assertEqual(applied["candidates"], result["candidates"])
+            self.assertEqual(applied["rejected"], result["candidates"])
+            self.assertEqual(applied["examples"], result["examples"])
+
 
 if __name__ == "__main__":
     unittest.main()

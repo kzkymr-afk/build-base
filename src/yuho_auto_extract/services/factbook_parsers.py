@@ -24,6 +24,8 @@ def parse_document(
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     ext = path.suffix.lower()
     if ext == ".pdf":
+        if _is_kajima_factbook(source, path):
+            return _parse_kajima_factbook_pdf(path, source, fetched_at)
         if _is_kajima_q_order(source):
             rows, warnings = _parse_kajima_q_order_pdf(path, source, fetched_at)
             return rows, warnings
@@ -75,6 +77,14 @@ def _is_kajima_q_order(source: Dict[str, Any]) -> bool:
     return str(source.get("company_id") or "") == "KAJIMA" and str(source.get("source_doc_type") or "") == "q_order"
 
 
+def _is_kajima_factbook(source: Dict[str, Any], path: Path) -> bool:
+    return (
+        str(source.get("company_id") or "") == "KAJIMA"
+        and str(source.get("source_doc_type") or "") == "factbook"
+        and path.name.lower().startswith("factbook")
+    )
+
+
 def _is_obayashi_results_reference(source: Dict[str, Any]) -> bool:
     return (
         str(source.get("company_id") or "") == "OBAYASHI"
@@ -106,6 +116,114 @@ def _parse_kajima_q_order_pdf(path: Path, source: Dict[str, Any], fetched_at: st
     if not rows:
         warnings.append(f"no Kajima q_order annual cumulative rows parsed from {path.name}")
     return rows, warnings
+
+
+def _parse_kajima_factbook_pdf(path: Path, source: Dict[str, Any], fetched_at: str) -> Tuple[List[Dict[str, Any]], List[str]]:
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError:
+        return [], ["pdfplumber is required to parse Kajima factbook PDFs"]
+    _suppress_pdfminer_warnings()
+    with pdfplumber.open(path) as pdf:
+        texts = [page.extract_text(x_tolerance=2, y_tolerance=2) or "" for page in pdf.pages]
+    rows = _parse_kajima_factbook_texts(texts, source, path, fetched_at)
+    warnings: List[str] = []
+    if not rows:
+        warnings.append(f"no Kajima building order use rows parsed from {path.name}")
+    return rows, warnings
+
+
+def _parse_kajima_factbook_texts(
+    texts: Sequence[str],
+    source: Dict[str, Any],
+    path: Path,
+    fetched_at: str,
+) -> List[Dict[str, Any]]:
+    categories = [
+        ("事務所・庁舎", "office"),
+        ("宿泊施設", "lodging"),
+        ("店舗", "commercial"),
+        ("工場・発電所", "factory"),
+        ("倉庫・流通施設", "logistics"),
+        ("住宅", "housing"),
+        ("教育・研究・文化施設", "education_research"),
+        ("医療・福祉施設", "medical_welfare"),
+        ("その他", "other_use"),
+    ]
+    rows: List[Dict[str, Any]] = []
+    for text in texts:
+        if "【工種別受注高（建設事業）】" not in text:
+            continue
+        years = _kajima_factbook_years(text)
+        if not years:
+            continue
+        in_order_section = False
+        in_building_section = False
+        for line in text.splitlines():
+            compact = re.sub(r"\s+", "", line)
+            if "【工種別受注高（建設事業）】" in compact:
+                in_order_section = True
+                continue
+            if in_order_section and compact.startswith("【"):
+                break
+            if not in_order_section:
+                continue
+            if compact.startswith("建築工事"):
+                in_building_section = True
+                continue
+            if not in_building_section:
+                continue
+            category = next(((raw, normalized) for raw, normalized in categories if compact.startswith(raw)), None)
+            if category is None:
+                continue
+            raw_category, normalized_category = category
+            amounts = [_number(token) for token in re.findall(r"-?\d[\d,]*(?:\.\d+)?|[-－]", line)]
+            numeric_amounts = [amount for amount in amounts if amount is not None]
+            if len(numeric_amounts) != len(years):
+                continue
+            for fiscal_year, amount in zip(years, numeric_amounts):
+                rows.append(
+                    {
+                        "company_id": source.get("company_id", ""),
+                        "company_name": source.get("company_name", ""),
+                        "fiscal_year": str(fiscal_year),
+                        "fiscal_year_end": f"{fiscal_year + 1}-03-31",
+                        "period_type": "annual",
+                        "period_label": f"{fiscal_year + 1}年3月期",
+                        "source_company_id": source.get("company_id", ""),
+                        "source_doc_type": source.get("source_doc_type", ""),
+                        "source_dataset_id": source.get("source_dataset_id", source.get("id", "")),
+                        "source_metric_id": "building_orders_by_use",
+                        "category_type": "use",
+                        "scope": source.get("scope") or "standalone",
+                        "business_scope": source.get("business_scope") or "building_orders",
+                        "use_category_raw": raw_category,
+                        "use_category_normalized": normalized_category,
+                        "order_amount": amount,
+                        "unit": "百万円",
+                        "amount_million_yen": amount,
+                        "source_url": source.get("url") or source.get("source_url") or source.get("source_page_url", ""),
+                        "source_page": source.get("source_page_url", ""),
+                        "source_table_title": "受注高（単体） 工種別受注高（建設事業） 建築工事",
+                        "source_quote": f"{raw_category} {fiscal_year + 1}年3月期 {amount:g}百万円",
+                        "source_file": str(path),
+                        "extraction_status": "parsed",
+                        "fetched_at_utc": fetched_at,
+                    }
+                )
+        if rows:
+            break
+    return rows
+
+
+def _kajima_factbook_years(text: str) -> List[int]:
+    for line in text.splitlines():
+        if "会計年度" not in line:
+            continue
+        years = [int(year) - 1 for year in re.findall(r"(20\d{2})\.3", line)]
+        if years:
+            return years
+    return []
 
 
 def _parse_taisei_databook_zip(path: Path, source: Dict[str, Any], fetched_at: str) -> Tuple[List[Dict[str, Any]], List[str]]:
